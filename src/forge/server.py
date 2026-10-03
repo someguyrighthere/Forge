@@ -668,7 +668,78 @@ def ensure_ollama(app: App) -> None:
     app.push_state()
 
 
+HANDOFF_SECONDS = 5.0
+
+
+def _instance_file() -> Path:
+    return config.HOME / "instance.json"
+
+
+def running_instance_url() -> str | None:
+    """The URL of an already-running Forge, or None. Stale files (crashed app) are ignored."""
+    try:
+        url = json.loads(_instance_file().read_text(encoding="utf-8")).get("url", "")
+        parsed = urllib.parse.urlparse(url)
+        token = urllib.parse.parse_qs(parsed.query).get("t", [""])[0]
+        if parsed.hostname != "127.0.0.1" or not parsed.port or not token:
+            return None
+        with urllib.request.urlopen(f"http://127.0.0.1:{parsed.port}/api/state?t={token}", timeout=2) as response:
+            return url if response.status == 200 else None
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def register_instance(url: str) -> None:
+    try:
+        config.ensure_home()
+        _instance_file().write_text(json.dumps({"url": url, "pid": os.getpid()}), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def clear_instance(url: str) -> None:
+    """Remove our registration at exit, but never a newer instance's."""
+    try:
+        if json.loads(_instance_file().read_text(encoding="utf-8")).get("url") == url:
+            _instance_file().unlink()
+    except (OSError, ValueError):
+        pass
+
+
+def watch_window(hub: Hub, grace: float = 10.0, connect_timeout: float = 45.0, poll: float = 0.5,
+                 now=time.monotonic, sleep=time.sleep) -> None:
+    """Block until the window is gone, judged by its connection to the event stream.
+
+    Used when the browser process we launched exited at once: Edge handed the window to another process
+    (for example one still shutting down on the same profile), so waiting on our process would quit too early.
+    Returns when a window that had connected stays disconnected for `grace` seconds, or when none ever
+    connects within `connect_timeout`.
+    """
+    started, empty_since, seen = now(), None, False
+    while True:
+        connected = bool(hub.subs)
+        seen = seen or connected
+        if connected:
+            empty_since = None
+        else:
+            if empty_since is None:
+                empty_since = now()
+            if seen and now() - empty_since >= grace:
+                return
+            if not seen and now() - started >= connect_timeout:
+                return
+        sleep(poll)
+
+
 def run(port: int = 0) -> int:
+    existing = running_instance_url()
+    if existing:
+        # Two instances would share one browser profile: the second window would open inside the first
+        # instance's browser and then point at a server that has already exited. Open a window on the
+        # running one instead.
+        if launch_window(existing) is None:
+            webbrowser.open(existing)
+        return 0
     app = App()
     handler = type("BoundHandler", (Handler,), {"app": app, "token": secrets.token_urlsafe(24)})
     server = ThreadingHTTPServer(("127.0.0.1", port), handler)
@@ -676,13 +747,17 @@ def run(port: int = 0) -> int:
     handler.port = server.server_port
     url = f"http://127.0.0.1:{server.server_port}/?t={handler.token}"
     threading.Thread(target=server.serve_forever, daemon=True).start()
+    register_instance(url)
     threading.Thread(target=ensure_ollama, args=(app,), daemon=True).start()
     threading.Thread(target=app.check_update, daemon=True).start()
     threading.Thread(target=app.check_whats_new, daemon=True).start()
     proc = launch_window(url)
     app.window = proc
     if proc is not None:
+        launched = time.monotonic()
         proc.wait()
+        if time.monotonic() - launched < HANDOFF_SECONDS:
+            watch_window(app.hub)
     else:
         webbrowser.open(url)
         print(f"Forge is running at {url}\nPress Ctrl+C to quit.")
@@ -691,5 +766,6 @@ def run(port: int = 0) -> int:
                 time.sleep(3600)
         except KeyboardInterrupt:
             pass
+    clear_instance(url)
     app.stop()
     os._exit(0)
