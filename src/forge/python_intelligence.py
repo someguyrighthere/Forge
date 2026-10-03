@@ -36,14 +36,25 @@ def _clip(text: str) -> str:
     return text[:MAX_OUTPUT] + f"\n... [truncated {len(text) - MAX_OUTPUT} characters]"
 
 
+def _npm_global_langserver() -> str | None:
+    """Where `npm install --global` puts the launcher, for when that folder is not on this process's PATH."""
+    base = os.environ.get("APPDATA")
+    if not base:
+        return None
+    candidate = Path(base) / "npm" / ("pyright-langserver.cmd" if os.name == "nt" else "pyright-langserver")
+    return str(candidate) if candidate.is_file() else None
+
+
 def _server_command() -> list[str]:
     executable = os.environ.get("PYRIGHT_LANGSERVER")
     if not executable:
-        executable = shutil.which("pyright-langserver") or shutil.which("pyright-langserver.cmd")
+        executable = (shutil.which("pyright-langserver") or shutil.which("pyright-langserver.cmd")
+                      or _npm_global_langserver())
     if not executable:
         raise RuntimeError(
             "Pyright's language server is not installed or is not on PATH. "
-            "Install Node.js, run `npm install --global pyright`, then restart Forge. "
+            "Install it from 'Optional downloads' in the Forge window, or install Node.js and run "
+            "`npm install --global pyright`. "
             "If needed, set PYRIGHT_LANGSERVER to the full path of pyright-langserver."
         )
     return [executable, "--stdio"]

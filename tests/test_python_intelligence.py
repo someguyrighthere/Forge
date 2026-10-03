@@ -19,6 +19,7 @@ def test_python_intelligence_tools_are_registered_read_only():
 def test_server_setup_error_explains_install(monkeypatch):
     monkeypatch.delenv("PYRIGHT_LANGSERVER", raising=False)
     monkeypatch.setattr(python_intelligence.shutil, "which", lambda _: None)
+    monkeypatch.setattr(python_intelligence, "_npm_global_langserver", lambda: None)
     with pytest.raises(RuntimeError, match="npm install --global pyright"):
         python_intelligence._server_command()
 
@@ -44,6 +45,7 @@ def test_locator_finds_symbols_by_name():
 def test_pyright_availability_is_reported(monkeypatch):
     monkeypatch.delenv("PYRIGHT_LANGSERVER", raising=False)
     monkeypatch.setattr(python_intelligence.shutil, "which", lambda _: None)
+    monkeypatch.setattr(python_intelligence, "_npm_global_langserver", lambda: None)
     assert python_intelligence.pyright_available() is False
     monkeypatch.setattr(python_intelligence.shutil, "which", lambda name: "C:/npm/pyright-langserver.cmd")
     assert python_intelligence.pyright_available() is True

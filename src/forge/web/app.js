@@ -266,13 +266,13 @@ function showWelcome() {
   else if (!installed.length) banner = `<div class="banner"><b>No models installed yet.</b><br>Download a model to get started (about 5 GB).<br><button class="btn go" id="dlDefault">Download qwen3:8b</button><div class="bar-prog" id="pullProg" ${S.pulling ? "" : "hidden"}><i></i></div></div>`;
   else if (!installed.includes(S.model)) banner = `<div class="banner"><b>${esc(S.model)} isn't installed.</b><br>Pick one of your installed models below the chat box, or download it.<br><button class="btn go" id="dlDefault">Download ${esc(S.model)}</button></div>`;
   let pyrightHint = "";
-  if (S.pyright === false && localStorage.getItem("forge.pyrightHintDismissed") !== "1") pyrightHint = `<div class="banner"><b>Python code tools need Pyright.</b><br>Install it once, then restart Forge: <code>npm install --global pyright</code> (needs <a href="https://nodejs.org" target="_blank" rel="noopener">Node.js</a>).<br><button class="btn" id="pyCopy">Copy command</button> <button class="btn" id="pyDismiss">Don't show again</button></div>`;
+  if (S.pyright === false && localStorage.getItem("forge.pyrightHintDismissed") !== "1") pyrightHint = `<div class="banner"><b>Python code tools need Pyright.</b><br>It's a small optional download that powers Forge's Python types, references and error checking.<br><button class="btn go" id="pyInstall">Install…</button> <button class="btn" id="pyDismiss">Don't show again</button></div>`;
   el.innerHTML = `<div class="logo big">F</div><h1>What should we build?</h1><p>Your local coding agent. It can read and edit files, run commands and search the web, all on this PC.</p>${banner}${pyrightHint}<div class="sugg">${SUGGEST.map((s, i) => `<button data-i="${i}"><b>${s[0]}</b><span>${s[1]}</span></button>`).join("")}</div>`;
   el.querySelector(".sugg").onclick = (e) => { const b = e.target.closest("button"); if (b) { input.value = SUGGEST[+b.dataset.i][1]; autosize(); input.focus(); } };
-  const pyCopy = el.querySelector("#pyCopy");
-  if (pyCopy) {
-    pyCopy.onclick = () => { navigator.clipboard.writeText("npm install --global pyright"); pyCopy.textContent = "Copied"; };
-    el.querySelector("#pyDismiss").onclick = () => { localStorage.setItem("forge.pyrightHintDismissed", "1"); pyCopy.closest(".banner").remove(); };
+  const pyInstall = el.querySelector("#pyInstall");
+  if (pyInstall) {
+    pyInstall.onclick = addonsDialog;
+    el.querySelector("#pyDismiss").onclick = () => { localStorage.setItem("forge.pyrightHintDismissed", "1"); pyInstall.closest(".banner").remove(); };
   }
   const dl = el.querySelector("#dlDefault");
   if (dl) dl.onclick = () => api("/api/command", { cmd: "pull", arg: S.model || "qwen3:8b" });
@@ -417,6 +417,47 @@ async function setFolder(path) {
 function modal(html) { const m = $("#modal"); m.innerHTML = `<div class="dlg">${html}</div>`; m.hidden = false; m.onmousedown = (e) => { if (e.target === m) closeModal(); }; return m; }
 function closeModal() { $("#modal").hidden = true; $("#modal").innerHTML = ""; }
 
+/* ------------------------------------------------- optional downloads */
+function addonRow(a) {
+  let status, action = "";
+  if (a.state === "installing") { status = '<span class="tag work">Installing…</span>'; action = '<button class="btn" disabled>Installing…</button>'; }
+  else if (a.installed) { status = '<span class="tag ok">✓ Installed</span>'; action = '<button class="btn" disabled>Installed</button>'; }
+  else if (a.blocker) {
+    status = '<span class="tag warn">Not available yet</span>';
+    action = `<button class="btn" disabled>Install</button>`;
+  } else {
+    status = '<span class="tag">Not installed</span>';
+    action = `<button class="btn go" data-id="${esc(a.id)}">${a.state === "failed" ? "Try again" : "Install"}</button>`;
+  }
+  const blocker = a.blocker ? `<div class="addon-note warn">${esc(a.blocker)} <a href="${esc(a.needs_link)}" target="_blank" rel="noopener">Get it</a>, then reopen this window.</div>` : "";
+  const failed = a.state === "failed" && a.detail ? `<pre class="addon-err">${esc(a.detail)}</pre>` : "";
+  const note = !a.installed && !a.blocker && a.note ? `<div class="addon-note">${esc(a.note)}</div>` : "";
+  const working = a.state === "installing" ? '<div class="addon-note">This can take a minute. You can keep using Forge.</div>' : "";
+  return `<div class="addon"><div class="addon-head"><b>${esc(a.name)}</b>${status}<span class="grow"></span>${action}</div><div class="addon-desc">${esc(a.description)}</div>${blocker}${note}${working}${failed}</div>`;
+}
+
+async function addonsDialog() {
+  const m = modal(`<h3>Optional downloads</h3><small>Extra components that unlock more of Forge. Every one is optional, and Forge works without them.</small><div id="addonList" class="addons">Checking…</div><div class="row"><button class="btn" id="mClose">Close</button></div>`);
+  m.querySelector("#mClose").onclick = closeModal;
+  const render = async () => {
+    const box = $("#addonList");
+    if (!box) return;
+    const list = await api("/api/addons");
+    if (!$("#addonList") || !Array.isArray(list)) return;
+    box.innerHTML = list.map(addonRow).join("");
+    box.querySelectorAll("button[data-id]").forEach((b) => {
+      b.onclick = async () => {
+        b.disabled = true;
+        const r = await command("addon_install", b.dataset.id);
+        render();
+        return r;
+      };
+    });
+    if (list.some((a) => a.state === "installing")) setTimeout(render, 1500);
+  };
+  render();
+}
+
 async function memoryDialog() {
   const mem = await api("/api/memory");
   const m = modal(`<h3>Memory</h3><small>Notes Forge sees at the start of every chat. Use /remember &lt;note&gt; to add one quickly.</small><textarea id="memText"></textarea><small></small><div class="row"><button class="btn" id="mCancel">Cancel</button><button class="btn go" id="mSave">Save</button></div>`);
@@ -444,6 +485,7 @@ const SLASH = [
   { name: "/init", desc: "Write an AGENT.md for this project", run: () => command("init") },
   { name: "/remember", desc: "Save a note to memory", arg: true, run: (a) => command("remember", a) },
   { name: "/memory", desc: "View and edit memory", run: memoryDialog },
+  { name: "/addons", desc: "Optional downloads (Pyright, Playwright)", run: addonsDialog },
   { name: "/folder", desc: "Open another project folder", run: () => setFolder("") },
 ];
 
@@ -521,6 +563,7 @@ $("#modeBtn").onclick = modeMenu;
 $("#modelBtn").onclick = modelMenu;
 $("#folderBtn").onclick = folderMenu;
 $("#memBtn").onclick = memoryDialog;
+$("#addonsBtn").onclick = addonsDialog;
 $("#attach").onclick = () => { input.focus(); input.value += (input.value && !input.value.endsWith(" ") ? " " : "") + "@"; autosize(); updateMenu(); };
 $("#toggleSide").onclick = () => $("#side").classList.toggle("collapsed");
 

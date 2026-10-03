@@ -45,20 +45,31 @@ forge --gui                open the desktop window
 - **GitHub:** `github_prs`, `github_issues` and `github_actions` list and inspect pull requests (with changed files and failing checks), issues (with comments, or search) and Actions runs (jobs, failed steps). They are read-only and use the project's `origin` remote, or pass `owner/name`. Public repositories work without a login; set `GITHUB_TOKEN` (or `GH_TOKEN`) for private repositories, higher rate limits and failed-job logs. The token is only ever sent to `api.github.com`.
 - **Notebooks:** `notebook_read` shows a Jupyter notebook's cells and outputs; `notebook_edit` replaces, inserts or deletes cells (it asks for confirmation in `ask` mode, and `/undo` reverts it). Forge edits the file only; it does not run cells.
 - **Rendered web pages:** `browser_read` loads a page in the machine's headless Edge or Chrome, runs its JavaScript, and returns the visible text and links, for pages `web_fetch` sees as empty. It reads only; it can't click or type. Set `FORGE_BROWSER` to use a specific browser.
-- **Interactive browsing (optional):** `browser_open`, `browser_click` and `browser_type` let Forge operate a page: it lists the page's numbered links, buttons and text boxes, and acts on them. Opening is read-only; clicking and typing ask for confirmation in `ask` mode (the card names the exact element) and are unavailable in plan mode. This needs Playwright in the Python Forge uses (`pip install playwright`; it drives your installed Edge or Chrome, so no browser download). Without it the tools say how to enable them.
+- **Interactive browsing (optional):** `browser_open`, `browser_click` and `browser_type` let Forge operate a page: it lists the page's numbered links, buttons and text boxes, and acts on them. Opening is read-only; clicking and typing ask for confirmation in `ask` mode (the card names the exact element) and are unavailable in plan mode. This needs Playwright in the Python Forge uses (install it from **Optional downloads**, or `pip install playwright`; it drives your installed Edge or Chrome, so no browser download). Without it the tools say how to enable them.
 - **Long sessions:** old messages are summarised automatically before the context fills up (`/compact` does it on demand).
 - **Sessions:** saved after every turn; `-c` or `/resume` reopens them.
 - **Input:** `@path/to/file` attaches a file, Tab completes commands and paths, Esc+Enter inserts a new line, Ctrl+C stops the current task.
 
+## Optional downloads
+
+Two features need a small extra component. Neither is required; Forge works without them.
+
+| Component | Unlocks | Needs |
+|---|---|---|
+| Pyright | The Python code tools (types, references, rename preview, call hierarchy, diagnostics) | Node.js |
+| Playwright | Clicking and typing on web pages | Python and Edge or Chrome |
+
+Click **🧩 Optional downloads** in the window's sidebar (or type `/addons`) to see what's installed and install either with one click. In the terminal, `/addons` lists them and `/addons install pyright` (or `playwright`) installs one. If a prerequisite is missing, the window says which one and links to it. To install by hand instead: `npm install --global pyright` and `pip install playwright`.
+
 ## Python code intelligence
 
-Forge uses Pyright's language server for Python symbols, hover/type information, go-to-definition, references, rename-impact preview, call hierarchy, and diagnostics. Install Node.js, then install Pyright for your user:
+Forge uses Pyright's language server for Python symbols, hover/type information, go-to-definition, references, rename-impact preview, call hierarchy, and diagnostics. Install it from **Optional downloads** (above), or yourself with Node.js:
 
 ```powershell
 npm install --global pyright
 ```
 
-Restart Forge after installation so it can find `pyright-langserver` on `PATH`. Forge reports setup instructions if the server is unavailable. If it is installed outside `PATH`, set `PYRIGHT_LANGSERVER` to the full path of the `pyright-langserver` executable (or `pyright-langserver.cmd` on Windows) before starting Forge. Pyright reads the selected project configuration, including `pyrightconfig.json` and supported `pyproject.toml` settings.
+Forge finds Pyright on `PATH` or in npm's global folder, so no restart is needed after installing. If it is installed somewhere else, set `PYRIGHT_LANGSERVER` to the full path of the `pyright-langserver` executable (or `pyright-langserver.cmd` on Windows) before starting Forge. Pyright reads the selected project configuration, including `pyrightconfig.json` and supported `pyproject.toml` settings.
 
 ## Config
 

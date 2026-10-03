@@ -15,7 +15,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from forge import config, llm, python_intelligence, tools, ui, updater
+from forge import addons, config, llm, python_intelligence, tools, ui, updater
 from forge.agent import compact, expand_mentions, run_turn, system_prompt
 
 WEB = Path(__file__).parent / "web"
@@ -504,6 +504,8 @@ class App:
             return self.pull(arg)
         elif cmd == "update":
             return self.apply_update()
+        elif cmd == "addon_install":
+            return addons.install(arg)
         elif cmd == "whatsnew_seen":
             updater.mark_seen()
             self.whats_new = None
@@ -568,6 +570,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.json(app.snapshot())
         if url.path == "/api/sessions":
             return self.json(app.sessions())
+        if url.path == "/api/addons":
+            return self.json(addons.get_addons())
         if url.path == "/api/files":
             return self.json(app.files(query.get("q", [""])[0]))
         if url.path == "/api/memory":

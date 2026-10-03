@@ -12,7 +12,7 @@ from prompt_toolkit.styles import Style
 from rich.panel import Panel
 from rich.table import Table
 
-from forge import config, llm, tools, ui
+from forge import addons, config, llm, tools, ui
 from forge.agent import compact, expand_mentions, run_turn, system_prompt
 
 from forge.version import __version__ as VERSION
@@ -32,6 +32,7 @@ COMMANDS = {
     "/compact": "summarise older messages now",
     "/remember": "save a note the agent sees in every session",
     "/memory": "show saved notes",
+    "/addons": "optional downloads  (/addons install pyright | playwright)",
     "/resume": "list or reopen saved sessions  (/resume <number>)",
     "/exit": "quit",
 }
@@ -82,6 +83,24 @@ def pick_model(cfg: dict, arg: str) -> None:
         return
     cfg["model"] = choice
     console.print(f"[green]Model set to {choice}.[/]")
+
+
+def show_addons(arg: str) -> None:
+    """List the optional downloads, or install one (`/addons install pyright`)."""
+    words = arg.split()
+    if len(words) == 2 and words[0] == "install":
+        with console.status(f"Installing {words[1]}… this can take a minute"):
+            ok, message = addons.run_install(words[1].lower())
+        console.print(f"[green]{message}[/]" if ok else f"[red]{message}[/]")
+        return
+    for item in addons.get_addons():
+        if item["installed"]:
+            state = "[green]installed[/]"
+        elif item["blocker"]:
+            state = f"[yellow]{item['blocker']}[/]"
+        else:
+            state = f"[dim]not installed: /addons install {item['id']}[/]"
+        console.print(f"[cyan]{item['name']:<11}[/] {state}\n            [dim]{item['description']}[/]")
 
 
 def show_sessions(arg: str, cfg: dict, messages: list, state: dict) -> None:
@@ -150,6 +169,8 @@ def handle_command(line: str, cfg: dict, approver: ui.Approver, messages: list, 
         console.print(f"[dim]{config.MEMORY_FILE}[/]")
     elif cmd in ("/resume", "/sessions"):
         show_sessions(arg, cfg, messages, state)
+    elif cmd == "/addons":
+        show_addons(arg)
     elif cmd == "/init":
         return ("Explore this project (list files, read the main ones) and write an AGENT.md in the working directory "
                 "with: what the project is, how to build/run/test it, the code layout, and conventions to follow. "
