@@ -112,7 +112,7 @@ function addNotice(text, level) { const el = document.createElement("div"); el.c
 const LABEL = {
   read_file: ["Reading", "Read"], write_file: ["Writing", "Wrote"], edit_file: ["Editing", "Edited"], list_dir: ["Listing", "Listed"],
   glob_files: ["Finding files", "Found files"], grep: ["Searching", "Searched"], run_command: ["Running", "Ran"],
-  python_debug: ["Debugging", "Debugged"],
+  python_debug: ["Debugging", "Debugged"], python_debugger: ["Stepping", "Stepped"],
   github_prs: ["Checking pull requests", "Checked pull requests"], github_issues: ["Checking issues", "Checked issues"],
   github_actions: ["Checking Actions runs", "Checked Actions runs"],
   notebook_read: ["Reading notebook", "Read notebook"], notebook_edit: ["Editing notebook", "Edited notebook"],
@@ -128,6 +128,7 @@ function targetOf(name, a) {
       return a.path || ".";
     case "run_command": return a.command || "";
     case "python_debug": return a.script || "";
+    case "python_debugger": return `${a.action || ""} ${a.script || a.expression || ""}`.trim();
     case "github_prs": case "github_issues": case "github_actions": {
       const id = a.number || a.run_id;
       return `${a.repo || ""}${id ? " #" + id : a.query ? " " + a.query : ""}`.trim();
@@ -185,11 +186,11 @@ function finishCall(ev) {
   el.classList.toggle("open", open);
 }
 
-const VERB = { run_command: "Run this command?", python_debug: "Run this script under the debugger?", edit_file: "Edit this file?", write_file: "Write this file?", notebook_edit: "Edit this notebook?", browser_click: "Click this on the page?", browser_type: "Type this on the page?" };
+const VERB = { run_command: "Run this command?", python_debug: "Run this script under the debugger?", python_debugger: "Run code in the debugger?", edit_file: "Edit this file?", write_file: "Write this file?", notebook_edit: "Edit this notebook?", browser_click: "Click this on the page?", browser_type: "Type this on the page?" };
 function addApproval(ev) {
   const el = document.createElement("div");
   el.className = "approval"; el.id = "a" + ev.id;
-  const isCmd = ev.name === "run_command" || ev.name === "python_debug" || ev.name === "browser_click" || ev.name === "browser_type";
+  const isCmd = ["run_command", "python_debug", "python_debugger", "browser_click", "browser_type"].includes(ev.name);
   el.innerHTML = `<div class="ah"><span class="st">⚠</span><span>${VERB[ev.name] || "Allow this action?"}</span><code></code></div><pre>${isCmd ? esc(ev.diff) : diffHtml(ev.diff)}</pre><div class="btns"><button class="btn go" data-a="allow">Allow</button><button class="btn" data-a="always">Always allow this session</button><button class="btn" data-a="deny">Deny</button></div>`;
   if (!isCmd) el.querySelector("code").textContent = ev.target;
   el.querySelector(".btns").onclick = (e) => {
@@ -432,19 +433,24 @@ function addonRow(a) {
   const blocker = a.blocker ? `<div class="addon-note warn">${esc(a.blocker)} <a href="${esc(a.needs_link)}" target="_blank" rel="noopener">Get it</a>, then reopen this window.</div>` : "";
   const failed = a.state === "failed" && a.detail ? `<pre class="addon-err">${esc(a.detail)}</pre>` : "";
   const note = !a.installed && !a.blocker && a.note ? `<div class="addon-note">${esc(a.note)}</div>` : "";
-  const working = a.state === "installing" ? '<div class="addon-note">This can take a minute. You can keep using Forge.</div>' : "";
+  const working = a.state === "installing" ? `<div class="addon-note">${esc(a.detail || "Starting…")} You can keep using Forge.</div>` : "";
   return `<div class="addon"><div class="addon-head"><b>${esc(a.name)}</b>${status}<span class="grow"></span>${action}</div><div class="addon-desc">${esc(a.description)}</div>${blocker}${note}${working}${failed}</div>`;
 }
 
+const ADDON_GROUPS = [["start", "To get started"], ["extra", "Optional extras"]];
+
 async function addonsDialog() {
-  const m = modal(`<h3>Optional downloads</h3><small>Extra components that unlock more of Forge. Every one is optional, and Forge works without them.</small><div id="addonList" class="addons">Checking…</div><div class="row"><button class="btn" id="mClose">Close</button></div>`);
+  const m = modal(`<h3>Downloads</h3><small>Ollama and an AI model are what let Forge answer. The optional extras unlock more features, and Forge works without them.</small><div id="addonList" class="addons">Checking…</div><div class="row"><button class="btn" id="mClose">Close</button></div>`);
   m.querySelector("#mClose").onclick = closeModal;
   const render = async () => {
     const box = $("#addonList");
     if (!box) return;
     const list = await api("/api/addons");
     if (!$("#addonList") || !Array.isArray(list)) return;
-    box.innerHTML = list.map(addonRow).join("");
+    box.innerHTML = ADDON_GROUPS.map(([group, title]) => {
+      const rows = list.filter((a) => a.group === group);
+      return rows.length ? `<div class="addon-group">${title}</div>` + rows.map(addonRow).join("") : "";
+    }).join("");
     box.querySelectorAll("button[data-id]").forEach((b) => {
       b.onclick = async () => {
         b.disabled = true;
@@ -485,7 +491,7 @@ const SLASH = [
   { name: "/init", desc: "Write an AGENT.md for this project", run: () => command("init") },
   { name: "/remember", desc: "Save a note to memory", arg: true, run: (a) => command("remember", a) },
   { name: "/memory", desc: "View and edit memory", run: memoryDialog },
-  { name: "/addons", desc: "Optional downloads (Pyright, Playwright)", run: addonsDialog },
+  { name: "/addons", desc: "Downloads: Ollama, a model, Pyright, Playwright", run: addonsDialog },
   { name: "/folder", desc: "Open another project folder", run: () => setFolder("") },
 ];
 

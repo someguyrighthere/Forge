@@ -1,5 +1,6 @@
 import subprocess
 import time
+from pathlib import Path
 
 import pytest
 
@@ -15,6 +16,9 @@ def clean_state(monkeypatch):
     monkeypatch.setattr(addons, "_python", lambda: "C:/py/python.exe")
     monkeypatch.setattr(addons, "find_browser", lambda: "C:/edge/msedge.exe")
     monkeypatch.setattr(addons, "_installed", lambda addon_id: False)
+    monkeypatch.setattr(addons, "_model_name", lambda: "qwen3:8b")
+    monkeypatch.setattr(addons.llm, "find_ollama", lambda: "C:/ollama/ollama.exe")
+    monkeypatch.setattr(addons.llm, "list_models", lambda: [])
     yield
     addons._progress.clear()
     addons._cache.clear()
@@ -33,12 +37,14 @@ def wait_for(condition, seconds=5):
     return False
 
 
-def test_lists_both_addons_with_status_and_what_they_do():
+def test_lists_every_component_in_two_groups_with_status_and_what_they_do():
     items = by_id(addons.get_addons())
-    assert set(items) == {"pyright", "playwright"}
+    assert list(items) == ["ollama", "model", "pyright", "playwright"]
+    assert [items[i]["group"] for i in items] == ["start", "start", "extra", "extra"]
     assert items["pyright"]["installed"] is False and items["pyright"]["blocker"] is None
     assert "Python code tools" in items["pyright"]["description"]
     assert items["playwright"]["note"] == "Installs into: C:/py/python.exe"
+    assert items["model"]["name"] == "AI model: qwen3:8b" and "about 5 GB" in items["model"]["description"]
 
 
 def test_installed_addons_are_reported_and_cannot_be_reinstalled(monkeypatch):
@@ -58,6 +64,19 @@ def test_missing_prerequisites_are_explained(monkeypatch):
     assert by_id(addons.get_addons())["playwright"]["blocker"] == "Needs Python (pip)."
     assert addons.install("pyright") == "Needs Node.js, which provides npm."
     assert not addons._progress  # a blocked install never starts
+
+
+def test_the_model_needs_ollama_installed_and_running(monkeypatch):
+    monkeypatch.setattr(addons.llm, "find_ollama", lambda: None)
+    assert by_id(addons.get_addons())["model"]["blocker"] == "Install Ollama first."
+
+    monkeypatch.setattr(addons.llm, "find_ollama", lambda: "C:/ollama/ollama.exe")
+
+    def unreachable():
+        raise addons.llm.OllamaError("Cannot reach Ollama")
+    monkeypatch.setattr(addons.llm, "list_models", unreachable)
+    assert "not running yet" in by_id(addons.get_addons())["model"]["blocker"]
+    assert addons.install("model") is not None and not addons._progress
 
 
 def test_run_install_uses_the_fixed_commands(monkeypatch):
@@ -116,7 +135,7 @@ def test_unknown_addons_are_rejected():
 
 def test_background_install_reports_progress_and_blocks_duplicates(monkeypatch):
     release = []
-    monkeypatch.setattr(addons, "run_install", lambda addon_id: (release and release[0] or time.sleep(0.3)) or (True, "Installed."))
+    monkeypatch.setattr(addons, "run_install", lambda addon_id, report=None: (release and release[0] or time.sleep(0.3)) or (True, "Installed."))
     assert addons.install("pyright") is None
     assert by_id(addons.get_addons())["pyright"]["state"] == "installing"
     assert addons.install("pyright") == "That is already installing."
@@ -124,7 +143,7 @@ def test_background_install_reports_progress_and_blocks_duplicates(monkeypatch):
 
 
 def test_a_failed_background_install_keeps_the_error_for_the_window(monkeypatch):
-    monkeypatch.setattr(addons, "run_install", lambda addon_id: (False, "npm ERR! network"))
+    monkeypatch.setattr(addons, "run_install", lambda addon_id, report=None: (False, "npm ERR! network"))
     addons.install("playwright")
     assert wait_for(lambda: addons._progress["playwright"]["state"] == "failed")
     entry = by_id(addons.get_addons())["playwright"]
@@ -140,11 +159,131 @@ def test_install_status_checks_are_cached_briefly(monkeypatch):
     assert calls.count("playwright") == 1  # not re-checked on every poll of the window
 
 
-def test_server_command_starts_an_install(monkeypatch):
-    started = []
-    monkeypatch.setattr(addons, "install", lambda addon_id: started.append(addon_id))
+def test_server_command_starts_an_install_and_rechecks_ollama_when_it_finishes(monkeypatch):
+    from forge import server
+    started, rechecked = [], []
+    monkeypatch.setattr(addons, "install", lambda addon_id, on_done=None: started.append((addon_id, on_done)))
+    monkeypatch.setattr(server, "ensure_ollama", lambda app: rechecked.append(app))
     app = App.__new__(App)
-    assert app.command("addon_install", "pyright") is None and started == ["pyright"]
+    assert app.command("addon_install", "ollama") is None
+    assert started[0][0] == "ollama"
+    started[0][1](True)   # the install finished
+    assert rechecked == [app]
+
+
+def test_installed_model_is_recognised_by_name(monkeypatch):
+    monkeypatch.undo()  # use the real _installed with Ollama's model list faked below
+    monkeypatch.setattr(addons.llm, "list_models", lambda: [{"name": "qwen3:8b"}, {"name": "llama3.2:latest"}])
+    monkeypatch.setattr(addons, "_model_name", lambda: "qwen3:8b")
+    assert addons._installed("model") is True
+    monkeypatch.setattr(addons, "_model_name", lambda: "llama3.2")   # no tag given: ":latest" counts
+    assert addons._installed("model") is True
+    monkeypatch.setattr(addons, "_model_name", lambda: "mistral")
+    assert addons._installed("model") is False
+
+
+def test_model_install_reports_download_progress(monkeypatch):
+    seen = []
+    monkeypatch.setattr(addons.llm, "list_models", lambda: [])
+    monkeypatch.setattr(addons.llm, "pull_model", lambda name, on_progress: (
+        [on_progress(status, pct) for status, pct in (("pulling manifest", None), ("pulling", 40), ("pulling", 100))],
+        seen.append(name)))
+    monkeypatch.setattr(addons, "_installed", lambda addon_id: True)
+    reports = []
+    assert addons.run_install("model", reports.append) == (True, "Installed.")
+    assert seen == ["qwen3:8b"] and reports == ["pulling manifest", "Downloading… 40%", "Downloading… 100%"]
+
+
+def test_model_download_errors_are_shown(monkeypatch):
+    def fail(name, on_progress):
+        raise addons.llm.OllamaError("pull model manifest: file does not exist")
+    monkeypatch.setattr(addons.llm, "pull_model", fail)
+    assert addons.run_install("model") == (False, "pull model manifest: file does not exist")
+
+
+def test_signature_check_accepts_only_a_valid_ollama_signature(monkeypatch, tmp_path):
+    def answer(text):
+        monkeypatch.setattr(addons.subprocess, "run",
+                            lambda *a, **k: type("R", (), {"stdout": text})())
+        return addons._signed_by_ollama(tmp_path / "OllamaSetup.exe")
+    assert answer("Valid|CN=Ollama Inc., O=Ollama Inc., C=US") is True
+    assert answer("Valid|CN=Some Other Publisher") is False       # signed, but not by Ollama
+    assert answer("NotSigned|") is False
+    assert answer("HashMismatch|CN=Ollama Inc.") is False        # tampered after signing
+    assert answer("") is False
+
+    def broken(*args, **kwargs):
+        raise OSError("powershell missing")
+    monkeypatch.setattr(addons.subprocess, "run", broken)
+    assert addons._signed_by_ollama(tmp_path / "x.exe") is False
+
+
+def test_signature_check_passes_the_file_path_inside_the_command_not_as_an_ignored_argument(monkeypatch):
+    # Arguments after -Command are not bound to param(), which once made every real installer fail the check.
+    seen = {}
+    monkeypatch.setattr(addons.subprocess, "run", lambda command, **k: seen.update(command=command) or type("R", (), {"stdout": ""})())
+    addons._signed_by_ollama(Path("C:/Temp/it's here/OllamaSetup.exe"))
+    script = seen["command"][-1]
+    assert "param(" not in script and "'C:\\Temp\\it''s here\\OllamaSetup.exe'" in script.replace("/", "\\")
+
+
+class FakeResponse:
+    def __init__(self, data):
+        self.data, self.headers = data, {"Content-Length": str(len(data))}
+
+    def read(self, size):
+        chunk, self.data = self.data[:size], self.data[size:]
+        return chunk
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def test_ollama_install_downloads_verifies_then_runs_silently_and_cleans_up(monkeypatch):
+    requested, ran, folders = [], [], []
+    monkeypatch.setattr(addons.urllib.request, "urlopen", lambda request, timeout=0: requested.append(request.full_url) or FakeResponse(b"x" * 3_000_000))
+    monkeypatch.setattr(addons, "_signed_by_ollama", lambda path: folders.append(path.parent) or True)
+    monkeypatch.setattr(addons.subprocess, "run", lambda command, **k: ran.append(command) or type("R", (), {"returncode": 0})())
+    monkeypatch.setattr(addons, "_installed", lambda addon_id: True)
+    monkeypatch.setattr(addons.time, "sleep", lambda s: None)
+    reports = []
+    assert addons.run_install("ollama", reports.append) == (True, "Installed.")
+    assert requested == ["https://ollama.com/download/OllamaSetup.exe"]       # only ever the fixed address
+    assert ran[0][1:] == ["/VERYSILENT", "/NORESTART"] and ran[0][0].endswith("OllamaSetup.exe")
+    assert any(r.startswith("Downloading…") for r in reports) and "Checking the download's signature…" in reports
+    assert not folders[0].exists()                                            # the 3 MB download was deleted
+
+
+def test_ollama_installer_is_never_run_when_its_signature_is_not_valid(monkeypatch):
+    ran = []
+    monkeypatch.setattr(addons.urllib.request, "urlopen", lambda request, timeout=0: FakeResponse(b"MZ not really"))
+    monkeypatch.setattr(addons, "_signed_by_ollama", lambda path: False)
+    monkeypatch.setattr(addons.subprocess, "run", lambda command, **k: ran.append(command))
+    ok, message = addons.run_install("ollama")
+    assert ok is False and "was not run" in message and ran == []
+
+
+def test_ollama_download_failures_are_reported(monkeypatch):
+    def offline(request, timeout=0):
+        raise OSError("no internet")
+    monkeypatch.setattr(addons.urllib.request, "urlopen", offline)
+    ok, message = addons.run_install("ollama")
+    assert ok is False and "no internet" in message
+
+
+def test_on_done_is_called_with_the_result_and_cannot_hide_it(monkeypatch):
+    monkeypatch.setattr(addons, "run_install", lambda addon_id, report=None: (True, "Installed."))
+    results = []
+
+    def broken_callback(ok):
+        results.append(ok)
+        raise RuntimeError("callback bug")
+    assert addons.install("pyright", on_done=broken_callback) is None
+    assert wait_for(lambda: addons._progress.get("pyright", {}).get("state") == "done")
+    assert results == [True]
 
 
 def test_pyright_is_found_in_npms_global_folder_without_a_restart(monkeypatch, tmp_path):

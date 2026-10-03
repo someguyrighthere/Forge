@@ -16,6 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from forge import addons, config, llm, python_intelligence, tools, ui, updater
+from forge.llm import find_ollama
 from forge.agent import compact, expand_mentions, run_turn, system_prompt
 
 WEB = Path(__file__).parent / "web"
@@ -212,14 +213,6 @@ def replay(messages: list) -> list[dict]:
             events.append({"type": "result", "id": pending.pop(0), "name": m.get("tool_name", ""),
                            "result": tools.clip(m.get("content", ""), 6000), "depth": 0})
     return events
-
-
-def find_ollama() -> str | None:
-    found = shutil.which("ollama")
-    if found:
-        return found
-    candidate = Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Ollama" / "ollama.exe"
-    return str(candidate) if candidate.is_file() else None
 
 
 class App:
@@ -432,18 +425,10 @@ class App:
 
         def work():
             try:
-                body = json.dumps({"model": name, "stream": True}).encode()
-                req = urllib.request.Request(llm.HOST + "/api/pull", data=body, headers={"Content-Type": "application/json"})
-                with urllib.request.urlopen(req, timeout=3600) as r:
-                    for line in r:
-                        chunk = json.loads(line)
-                        if "error" in chunk:
-                            raise RuntimeError(chunk["error"])
-                        total, done = chunk.get("total") or 0, chunk.get("completed") or 0
-                        pct = int(done * 100 / total) if total else None
-                        self.hub.emit("pull", persist=False, name=name, status=chunk.get("status", ""), pct=pct)
+                llm.pull_model(name, lambda status, pct: self.hub.emit("pull", persist=False, name=name,
+                                                                        status=status, pct=pct))
                 self.view.notice(f"Downloaded {name}.")
-            except Exception as e:
+            except llm.OllamaError as e:
                 self.view.notice(f"Download failed: {e}", "error")
             finally:
                 self.pulling = None
@@ -505,7 +490,7 @@ class App:
         elif cmd == "update":
             return self.apply_update()
         elif cmd == "addon_install":
-            return addons.install(arg)
+            return addons.install(arg, on_done=lambda ok: ensure_ollama(self))
         elif cmd == "whatsnew_seen":
             updater.mark_seen()
             self.whats_new = None
@@ -710,6 +695,60 @@ def clear_instance(url: str) -> None:
         pass
 
 
+STARTUP_LOCK_STALE_SECONDS = 30.0
+
+
+def _startup_lock() -> Path:
+    return config.HOME / "startup.lock"
+
+
+def acquire_startup_lock(timeout: float = 20.0, poll: float = 0.2) -> bool:
+    """Atomically become the one process allowed to start a Forge server.
+
+    Two copies launched at the same instant would both see "nothing running" and both start. The
+    first to create the lock file wins; the other waits here. Returns False when the winner has come
+    up (so the caller should open a window on it), True when this process may start. A lock left by
+    a crashed start is taken over after STARTUP_LOCK_STALE_SECONDS, or when the wait times out.
+    """
+    config.ensure_home()
+    path = _startup_lock()
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            handle = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            if running_instance_url():
+                return False
+            try:
+                stale = time.time() - path.stat().st_mtime > STARTUP_LOCK_STALE_SECONDS
+            except OSError:
+                continue  # the winner just released it; try to take it
+            if stale or time.monotonic() > deadline:
+                path.unlink(missing_ok=True)
+                continue
+            time.sleep(poll)
+            continue
+        except OSError:
+            return True  # cannot use a lock file here; start anyway rather than refuse to open
+        with os.fdopen(handle, "w") as lock:
+            lock.write(str(os.getpid()))
+        if running_instance_url():
+            # The previous holder registered itself and released the lock between our checks.
+            release_startup_lock()
+            return False
+        return True
+
+
+def release_startup_lock() -> None:
+    """Remove the lock, but only if it is ours."""
+    path = _startup_lock()
+    try:
+        if path.read_text(encoding="utf-8").strip() == str(os.getpid()):
+            path.unlink()
+    except OSError:
+        pass
+
+
 def watch_window(hub: Hub, grace: float = 10.0, connect_timeout: float = 45.0, poll: float = 0.5,
                  now=time.monotonic, sleep=time.sleep) -> None:
     """Block until the window is gone, judged by its connection to the event stream.
@@ -737,6 +776,8 @@ def watch_window(hub: Hub, grace: float = 10.0, connect_timeout: float = 45.0, p
 
 def run(port: int = 0) -> int:
     existing = running_instance_url()
+    if not existing and not acquire_startup_lock():
+        existing = running_instance_url()
     if existing:
         # Two instances would share one browser profile: the second window would open inside the first
         # instance's browser and then point at a server that has already exited. Open a window on the
@@ -744,14 +785,17 @@ def run(port: int = 0) -> int:
         if launch_window(existing) is None:
             webbrowser.open(existing)
         return 0
-    app = App()
-    handler = type("BoundHandler", (Handler,), {"app": app, "token": secrets.token_urlsafe(24)})
-    server = ThreadingHTTPServer(("127.0.0.1", port), handler)
-    server.daemon_threads = True
-    handler.port = server.server_port
-    url = f"http://127.0.0.1:{server.server_port}/?t={handler.token}"
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    register_instance(url)
+    try:
+        app = App()
+        handler = type("BoundHandler", (Handler,), {"app": app, "token": secrets.token_urlsafe(24)})
+        server = ThreadingHTTPServer(("127.0.0.1", port), handler)
+        server.daemon_threads = True
+        handler.port = server.server_port
+        url = f"http://127.0.0.1:{server.server_port}/?t={handler.token}"
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        register_instance(url)
+    finally:
+        release_startup_lock()
     threading.Thread(target=ensure_ollama, args=(app,), daemon=True).start()
     threading.Thread(target=app.check_update, daemon=True).start()
     threading.Thread(target=app.check_whats_new, daemon=True).start()

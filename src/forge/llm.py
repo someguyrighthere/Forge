@@ -3,9 +3,11 @@ import json
 import os
 import http.client
 import re
+import shutil
 import threading
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 if not HOST.startswith("http"):
@@ -51,6 +53,34 @@ def list_models() -> list[dict]:
             return json.load(r).get("models", [])
     except (urllib.error.URLError, TimeoutError) as e:
         raise OllamaError(f"Cannot reach Ollama at {HOST}: {e}") from None
+
+
+def find_ollama() -> str | None:
+    """Path of the Ollama executable, or None when it is not installed."""
+    found = shutil.which("ollama")
+    if found:
+        return found
+    candidate = Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Ollama" / "ollama.exe"
+    return str(candidate) if candidate.is_file() else None
+
+
+def pull_model(name: str, on_progress=None, timeout: int = 3600) -> None:
+    """Download a model through Ollama, calling on_progress(status, percent or None) as it goes."""
+    request = urllib.request.Request(HOST + "/api/pull", data=json.dumps({"model": name, "stream": True}).encode(),
+                                     headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            for line in response:
+                chunk = json.loads(line)
+                if "error" in chunk:
+                    raise OllamaError(str(chunk["error"]))
+                total, done = chunk.get("total") or 0, chunk.get("completed") or 0
+                if on_progress:
+                    on_progress(chunk.get("status", ""), int(done * 100 / total) if total else None)
+    except urllib.error.URLError as e:
+        raise OllamaError(f"Cannot reach Ollama at {HOST}: {e.reason}. Is it running?") from None
+    except (OSError, ValueError) as e:
+        raise OllamaError(str(e)) from None
 
 
 def _options(model: str, num_ctx: int, think: bool) -> dict:

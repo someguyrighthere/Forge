@@ -18,7 +18,7 @@ from forge.python_debug import _python_executable
 MAX_OUTPUT = 8000
 CALL_TIMEOUT = 45
 NO_WINDOW = 0x08000000 if os.name == "nt" else 0
-SETUP_HINT = ("Interactive browsing needs Playwright in the Python that Forge uses: install it from 'Optional downloads' "
+SETUP_HINT = ("Interactive browsing needs Playwright in the Python that Forge uses: install it from 'Downloads' "
               "in the Forge window, or run `pip install playwright` "
               "(it drives your installed Edge or Chrome, so no browser download is needed), then try again. "
               "Set FORGE_PYTHON to choose a different Python.")

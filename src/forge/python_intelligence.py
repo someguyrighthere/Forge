@@ -53,7 +53,7 @@ def _server_command() -> list[str]:
     if not executable:
         raise RuntimeError(
             "Pyright's language server is not installed or is not on PATH. "
-            "Install it from 'Optional downloads' in the Forge window, or install Node.js and run "
+            "Install it from 'Downloads' in the Forge window, or install Node.js and run "
             "`npm install --global pyright`. "
             "If needed, set PYRIGHT_LANGSERVER to the full path of pyright-langserver."
         )

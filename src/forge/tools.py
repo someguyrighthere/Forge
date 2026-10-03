@@ -14,6 +14,7 @@ from forge.github import github_actions, github_issues, github_prs
 from forge.notebook import apply_edit as _apply_notebook_edit
 from forge.notebook import notebook_read, outline
 from forge.python_debug import python_debug
+from forge.python_stepper import python_debugger
 from forge.python_intelligence import (
     python_call_hierarchy,
     python_definition,
@@ -358,6 +359,16 @@ TOOLS = [
                              "run_id show that run's jobs, failed steps and (when GITHUB_TOKEN is set) failed-job log tails. "
                              "repo is 'owner/name' (default: this project's git origin).",
            {"repo": S, "run_id": {"type": "integer"}, "branch": S, "status": S, "limit": {"type": "integer"}}, []),
+    schema("python_debugger", "Step through a Python script interactively. action=start (script, optional breakpoints like "
+                              "'file.py:42 if x > 3' - read the file first to get the real line numbers; args; stops at the "
+                              "first line unless stop_on_entry=false), then step "
+                              "(into a call), next (over it), out (until this function returns), continue (to the next "
+                              "breakpoint or the end), eval (expression, evaluated in the paused frame), stop. Every action "
+                              "returns where it stopped, nearby source and local variables. Runs code: asks for approval to "
+                              "start and to eval. For a quick one-shot look, python_debug is simpler.",
+           {"action": {"type": "string", "enum": ["start", "step", "next", "out", "continue", "eval", "stop"]},
+            "script": S, "breakpoints": {"type": "array", "items": S}, "args": {"type": "array", "items": S},
+            "expression": S, "stop_on_entry": {"type": "boolean"}}, ["action"]),
     schema("run_command", "Run a shell command (PowerShell on Windows) and return its output.",
            {"command": S, "timeout": {"type": "integer"}}, ["command"]),
     schema("web_search", "Search the web and return result titles, links and snippets.", {"query": S}, ["query"]),
@@ -372,11 +383,23 @@ TOOLS = [
 IMPLS = {f.__name__: f for f in (read_file, write_file, edit_file, notebook_read, notebook_edit, list_dir, glob_files, grep,
                                   python_symbols, python_hover, python_definition, python_references,
                                   python_call_hierarchy, python_rename_impact,
-                                  python_module_usage, python_diagnostics, python_debug, github_prs, github_issues,
-                                  github_actions,
+                                  python_module_usage, python_diagnostics, python_debug, python_debugger, github_prs,
+                                  github_issues, github_actions,
                                   run_command, web_search, web_fetch, browser_read, browser_open, browser_click,
                                   browser_type, browser_close, todo)}
-NEEDS_APPROVAL = {"write_file", "edit_file", "notebook_edit", "run_command", "python_debug", "browser_click", "browser_type"}
+NEEDS_APPROVAL = {"write_file", "edit_file", "notebook_edit", "run_command", "python_debug", "python_debugger",
+                  "browser_click", "browser_type"}
+# Some tools only need approval for certain actions (stepping an already-approved session does not).
+APPROVAL_ACTIONS = {"python_debugger": {"start", "eval"}}
+
+
+def needs_approval(name: str, args: dict) -> bool:
+    if name not in NEEDS_APPROVAL:
+        return False
+    actions = APPROVAL_ACTIONS.get(name)
+    return actions is None or args.get("action") in actions
+
+
 READ_ONLY = {"read_file", "list_dir", "glob_files", "grep", "python_symbols", "python_hover",
              "python_definition", "python_references", "python_rename_impact", "python_call_hierarchy",
              "python_module_usage", "python_diagnostics", "github_prs", "github_issues", "github_actions", "notebook_read",

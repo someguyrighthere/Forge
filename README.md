@@ -42,28 +42,33 @@ forge --gui                open the desktop window
 - **Memory:** `/remember <note>` is injected into every session. An `AGENT.md` in the project folder is loaded automatically (`/init` writes one). The git status is included in the prompt.
 - **Python code intelligence:** Pyright-backed tools provide symbols, inferred types and documentation, go-to-definition, references, rename-impact preview, call hierarchy, and diagnostics in both the terminal and desktop app. `python_module_usage` lists exactly which names one file uses from another module. These read-only tools are also available in plan mode, and the window shows a one-time hint if Pyright isn't installed.
 - **Python debugging:** `python_debug` runs a script with breakpoints (optionally conditional, e.g. `app.py:42 if x > 3`) and reports the call stack, local variables and chosen expressions at each hit, or the locals at an uncaught exception. It executes code, so it asks for confirmation in `ask` mode and is unavailable in plan mode. It uses the project's `.venv`/`venv` Python, else `python` on PATH; set `FORGE_PYTHON` to override.
+- **Stepping debugger:** `python_debugger` is the interactive version: `start` a script (optional breakpoints, stops on the first line), then `step` into a call, `next` over it, `out` until the function returns, `continue` to the next breakpoint, `eval` an expression in the paused frame, and `stop`. Every action reports where it stopped, nearby source, local variables and the call stack, plus anything the program printed. An uncaught exception stops for inspection. Breakpoints that never fire are explained (line never ran, or condition never true). Library code is not stepped into, and the program gets no keyboard input. Starting a session and evaluating expressions ask for confirmation in `ask` mode; stepping does not. Unavailable in plan mode.
 - **GitHub:** `github_prs`, `github_issues` and `github_actions` list and inspect pull requests (with changed files and failing checks), issues (with comments, or search) and Actions runs (jobs, failed steps). They are read-only and use the project's `origin` remote, or pass `owner/name`. Public repositories work without a login; set `GITHUB_TOKEN` (or `GH_TOKEN`) for private repositories, higher rate limits and failed-job logs. The token is only ever sent to `api.github.com`.
 - **Notebooks:** `notebook_read` shows a Jupyter notebook's cells and outputs; `notebook_edit` replaces, inserts or deletes cells (it asks for confirmation in `ask` mode, and `/undo` reverts it). Forge edits the file only; it does not run cells.
 - **Rendered web pages:** `browser_read` loads a page in the machine's headless Edge or Chrome, runs its JavaScript, and returns the visible text and links, for pages `web_fetch` sees as empty. It reads only; it can't click or type. Set `FORGE_BROWSER` to use a specific browser.
-- **Interactive browsing (optional):** `browser_open`, `browser_click` and `browser_type` let Forge operate a page: it lists the page's numbered links, buttons and text boxes, and acts on them. Opening is read-only; clicking and typing ask for confirmation in `ask` mode (the card names the exact element) and are unavailable in plan mode. This needs Playwright in the Python Forge uses (install it from **Optional downloads**, or `pip install playwright`; it drives your installed Edge or Chrome, so no browser download). Without it the tools say how to enable them.
+- **Interactive browsing (optional):** `browser_open`, `browser_click` and `browser_type` let Forge operate a page: it lists the page's numbered links, buttons and text boxes, and acts on them. Opening is read-only; clicking and typing ask for confirmation in `ask` mode (the card names the exact element) and are unavailable in plan mode. This needs Playwright in the Python Forge uses (install it from **Downloads**, or `pip install playwright`; it drives your installed Edge or Chrome, so no browser download). Without it the tools say how to enable them.
 - **Long sessions:** old messages are summarised automatically before the context fills up (`/compact` does it on demand).
 - **Sessions:** saved after every turn; `-c` or `/resume` reopens them.
 - **Input:** `@path/to/file` attaches a file, Tab completes commands and paths, Esc+Enter inserts a new line, Ctrl+C stops the current task.
 
-## Optional downloads
+## Downloads
 
-Two features need a small extra component. Neither is required; Forge works without them.
+Click **🧩 Downloads** in the window's sidebar (or type `/addons`) to see what's installed and install it with one click. Two parts get Forge started, and two are optional extras:
 
-| Component | Unlocks | Needs |
+| Component | What it is | Needs |
 |---|---|---|
-| Pyright | The Python code tools (types, references, rename preview, call hierarchy, diagnostics) | Node.js |
-| Playwright | Clicking and typing on web pages | Python and Edge or Chrome |
+| Ollama | The program that runs the AI model on your machine. Downloaded only from `ollama.com` and run only if Windows reports a valid signature from Ollama. | Nothing |
+| AI model | The default model (`qwen3:8b`, about 5 GB), downloaded through Ollama with live progress. | Ollama |
+| Pyright (extra) | Unlocks the Python code tools (types, references, rename preview, call hierarchy, diagnostics). | Node.js |
+| Playwright (extra) | Unlocks clicking and typing on web pages. | Python and Edge or Chrome |
 
-Click **🧩 Optional downloads** in the window's sidebar (or type `/addons`) to see what's installed and install either with one click. In the terminal, `/addons` lists them and `/addons install pyright` (or `playwright`) installs one. If a prerequisite is missing, the window says which one and links to it. To install by hand instead: `npm install --global pyright` and `pip install playwright`.
+In the terminal, `/addons` lists them and `/addons install ollama|model|pyright|playwright` installs one. If a prerequisite is missing, the window says which one and links to it. To install the extras by hand: `npm install --global pyright` and `pip install playwright`.
+
+Starting Forge twice at the same moment opens a single window rather than two competing copies.
 
 ## Python code intelligence
 
-Forge uses Pyright's language server for Python symbols, hover/type information, go-to-definition, references, rename-impact preview, call hierarchy, and diagnostics. Install it from **Optional downloads** (above), or yourself with Node.js:
+Forge uses Pyright's language server for Python symbols, hover/type information, go-to-definition, references, rename-impact preview, call hierarchy, and diagnostics. Install it from **Downloads** (above), or yourself with Node.js:
 
 ```powershell
 npm install --global pyright

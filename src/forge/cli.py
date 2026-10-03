@@ -32,7 +32,7 @@ COMMANDS = {
     "/compact": "summarise older messages now",
     "/remember": "save a note the agent sees in every session",
     "/memory": "show saved notes",
-    "/addons": "optional downloads  (/addons install pyright | playwright)",
+    "/addons": "downloads  (/addons install ollama | model | pyright | playwright)",
     "/resume": "list or reopen saved sessions  (/resume <number>)",
     "/exit": "quit",
 }

@@ -90,3 +90,61 @@ def test_second_launch_falls_back_to_the_default_browser_when_there_is_no_edge(m
     monkeypatch.setattr(server, "launch_window", lambda url: None)
     monkeypatch.setattr(server.webbrowser, "open", lambda url: opened.append(url))
     assert server.run() == 0 and opened == ["http://127.0.0.1:5000/?t=abc"]
+
+
+def test_only_one_process_wins_the_startup_lock(home, monkeypatch):
+    monkeypatch.setattr(server, "running_instance_url", lambda: None)
+    assert server.acquire_startup_lock() is True
+    assert (home / "startup.lock").read_text(encoding="utf-8") == str(__import__("os").getpid())
+    # A second launch at the same instant waits, and gives up its claim once the winner is serving.
+    answers = iter([None, None, "http://127.0.0.1:5000/?t=abc"])
+    monkeypatch.setattr(server, "running_instance_url", lambda: next(answers))
+    assert server.acquire_startup_lock(timeout=5, poll=0.01) is False
+
+
+def test_a_stale_lock_from_a_crashed_start_is_taken_over(home, monkeypatch):
+    import os
+    monkeypatch.setattr(server, "running_instance_url", lambda: None)
+    lock = home / "startup.lock"
+    lock.write_text("99999", encoding="utf-8")
+    old = lock.stat().st_mtime - server.STARTUP_LOCK_STALE_SECONDS - 5
+    os.utime(lock, (old, old))
+    assert server.acquire_startup_lock(timeout=5, poll=0.01) is True
+    assert lock.read_text(encoding="utf-8") == str(os.getpid())
+
+
+def test_a_waiting_launch_takes_over_when_the_winner_never_comes_up(home, monkeypatch):
+    monkeypatch.setattr(server, "running_instance_url", lambda: None)
+    (home / "startup.lock").write_text("99999", encoding="utf-8")  # fresh lock, but its owner hangs
+    assert server.acquire_startup_lock(timeout=0.3, poll=0.05) is True
+
+
+def test_release_only_removes_our_own_lock(home):
+    import os
+    lock = home / "startup.lock"
+    lock.write_text("not-our-pid", encoding="utf-8")
+    server.release_startup_lock()
+    assert lock.exists()
+    lock.write_text(str(os.getpid()), encoding="utf-8")
+    server.release_startup_lock()
+    assert not lock.exists()
+
+
+def test_the_lock_is_released_even_when_startup_fails(home, monkeypatch):
+    monkeypatch.setattr(server, "running_instance_url", lambda: None)
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("could not load config")
+    monkeypatch.setattr(server, "App", broken)
+    with pytest.raises(RuntimeError):
+        server.run()
+    assert not (home / "startup.lock").exists()
+
+
+def test_a_launch_that_finds_the_lock_free_but_the_winner_running_hands_off(home, monkeypatch):
+    # The winner registers itself and then releases the lock; a waiting launch must not claim the free lock
+    # and start a second server.
+    monkeypatch.setattr(server, "running_instance_url", lambda: "http://127.0.0.1:5000/?t=abc")
+    assert not (home / "startup.lock").exists()            # the winner already released it...
+    assert server.acquire_startup_lock(timeout=5, poll=0.01) is False   # ...but it is serving, so we must not start
+    assert not (home / "startup.lock").exists()  # the claim we briefly held is released

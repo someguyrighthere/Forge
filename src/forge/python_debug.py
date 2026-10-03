@@ -156,7 +156,9 @@ def _parse_breakpoints(breakpoints: list, root: Path) -> list[dict]:
         file = Path(os.path.expanduser(match["file"]))
         file = (file if file.is_absolute() else root / file).resolve()
         if file.suffix.lower() != ".py" or not file.is_file():
-            raise ValueError(f"Breakpoint file does not exist or is not a .py file: {file}")
+            raise ValueError(f"Breakpoint file does not exist or is not a .py file: {file}. The format is "
+                             f"'path/to/file.py:LINE' with a line NUMBER (not a function name), optionally followed by "
+                             f"' if condition', e.g. 'shop.py:3 if price == 50'.")
         parsed.append({"file": str(file), "line": int(match["line"]), "condition": match["condition"]})
     return parsed
 

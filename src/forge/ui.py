@@ -10,7 +10,7 @@ from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.text import Text
 
-from forge import browser_session, notebook, tools
+from forge import browser_session, notebook, python_stepper, tools
 
 for _stream in (sys.stdout, sys.stderr):
     _reconfigure = getattr(_stream, "reconfigure", None)
@@ -27,6 +27,8 @@ def describe_call(name: str, args: dict) -> str:
         return str(args.get("command", ""))
     if name == "python_debug":
         return str(args.get("script", ""))
+    if name == "python_debugger":
+        return f"{args.get('action', '')} {args.get('script') or args.get('expression') or ''}".strip()
     if name.startswith("python_"):
         return f"{args.get('path', '')} {args.get('symbol') or args.get('module') or ''}".strip()
     if name.startswith("github_"):
@@ -85,6 +87,8 @@ def diff_text(name: str, args: dict) -> str:
         parts += [f"breakpoint: {b}" for b in args.get("breakpoints") or []]
         parts += [f"evaluate: {e}" for e in args.get("expressions") or []]
         return "\n".join(parts)
+    if name == "python_debugger":
+        return python_stepper.describe_action(args)
     if name in ("browser_click", "browser_type"):
         return browser_session.describe_action(name, args)
     return str(args.get("command", ""))
@@ -103,14 +107,15 @@ class Approver:
         return self.mode == "auto"
 
     def allow(self, name: str, args: dict) -> bool:
-        if self.mode == "auto" or name not in tools.NEEDS_APPROVAL or name in self.always:
+        if self.mode == "auto" or not tools.needs_approval(name, args) or name in self.always:
             return True
         if name == "run_command" and any(r.search(str(args.get("command", ""))) for r in self.allow_rules):
             return True
         return self.ask(name, args)
 
     def ask(self, name: str, args: dict) -> bool:
-        lang = {"run_command": "powershell", "python_debug": "text", "browser_click": "text", "browser_type": "text"}.get(name, "diff")
+        lang = {"run_command": "powershell", "python_debug": "text", "python_debugger": "text",
+                "browser_click": "text", "browser_type": "text"}.get(name, "diff")
         console.print(Panel(Syntax(diff_text(name, args), lang, theme="ansi_dark"),
                             title=f"[yellow]{name}[/] {describe_call(name, args)}", border_style="yellow"))
         while True:
