@@ -1,6 +1,7 @@
 import io
 import urllib.error
 import urllib.request
+from http.client import HTTPMessage
 
 import pytest
 
@@ -100,7 +101,9 @@ def test_actions_run_detail_only_fetches_logs_with_a_token(monkeypatch):
 def test_http_errors_become_helpful_messages(monkeypatch):
     def failing(code):
         def opener(request, timeout=0):
-            raise urllib.error.HTTPError(request.full_url, code, "x", {"X-RateLimit-Remaining": "0"}, io.BytesIO())
+            headers = HTTPMessage()
+            headers["X-RateLimit-Remaining"] = "0"
+            raise urllib.error.HTTPError(request.full_url, code, "x", headers, io.BytesIO())
         return opener
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
     monkeypatch.delenv("GH_TOKEN", raising=False)
@@ -113,7 +116,8 @@ def test_http_errors_become_helpful_messages(monkeypatch):
 def test_token_is_not_forwarded_to_other_hosts_on_redirect():
     handler = github._SameHostRedirects()
     request = urllib.request.Request("https://api.github.com/x", headers={"Authorization": "Bearer secret"})
-    other = handler.redirect_request(request, None, 302, "Found", {}, "https://storage.example.com/log")
-    same = handler.redirect_request(request, None, 302, "Found", {}, "https://api.github.com/y")
+    other = handler.redirect_request(request, io.BytesIO(), 302, "Found", HTTPMessage(), "https://storage.example.com/log")
+    same = handler.redirect_request(request, io.BytesIO(), 302, "Found", HTTPMessage(), "https://api.github.com/y")
+    assert other is not None and same is not None
     assert not other.has_header("Authorization")
     assert same.get_header("Authorization") == "Bearer secret"

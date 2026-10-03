@@ -117,6 +117,8 @@ const LABEL = {
   github_actions: ["Checking Actions runs", "Checked Actions runs"],
   notebook_read: ["Reading notebook", "Read notebook"], notebook_edit: ["Editing notebook", "Edited notebook"],
   browser_read: ["Opening in browser", "Read in browser"],
+  browser_open: ["Opening page", "Opened page"], browser_click: ["Clicking", "Clicked"], browser_type: ["Typing", "Typed"],
+  browser_close: ["Closing browser", "Closed browser"],
   web_search: ["Searching the web", "Searched the web"], web_fetch: ["Fetching", "Fetched"], task: ["Researching", "Researched"],
 };
 
@@ -131,11 +133,13 @@ function targetOf(name, a) {
       return `${a.repo || ""}${id ? " #" + id : a.query ? " " + a.query : ""}`.trim();
     }
     case "python_hover": case "python_definition": case "python_references": case "python_rename_impact":
-    case "python_call_hierarchy": case "python_symbols": case "python_diagnostics":
-      return `${a.path || ""}${a.symbol ? " · " + a.symbol : ""}`;
+    case "python_call_hierarchy": case "python_symbols": case "python_diagnostics": case "python_module_usage":
+      return `${a.path || ""}${a.symbol || a.module ? " · " + (a.symbol || a.module) : ""}`;
     case "glob_files": case "grep": return `${a.pattern || ""}${a.path && a.path !== "." ? " in " + a.path : ""}`;
     case "web_search": return a.query || "";
-    case "web_fetch": case "browser_read": return a.url || "";
+    case "web_fetch": case "browser_read": case "browser_open": return a.url || "";
+    case "browser_click": return "element [" + (a.index ?? "?") + "]";
+    case "browser_type": return "element [" + (a.index ?? "?") + "]: " + (a.text || "").slice(0, 40);
     case "task": return (a.prompt || "").slice(0, 90);
   }
   return "";
@@ -181,11 +185,11 @@ function finishCall(ev) {
   el.classList.toggle("open", open);
 }
 
-const VERB = { run_command: "Run this command?", python_debug: "Run this script under the debugger?", edit_file: "Edit this file?", write_file: "Write this file?", notebook_edit: "Edit this notebook?" };
+const VERB = { run_command: "Run this command?", python_debug: "Run this script under the debugger?", edit_file: "Edit this file?", write_file: "Write this file?", notebook_edit: "Edit this notebook?", browser_click: "Click this on the page?", browser_type: "Type this on the page?" };
 function addApproval(ev) {
   const el = document.createElement("div");
   el.className = "approval"; el.id = "a" + ev.id;
-  const isCmd = ev.name === "run_command" || ev.name === "python_debug";
+  const isCmd = ev.name === "run_command" || ev.name === "python_debug" || ev.name === "browser_click" || ev.name === "browser_type";
   el.innerHTML = `<div class="ah"><span class="st">⚠</span><span>${VERB[ev.name] || "Allow this action?"}</span><code></code></div><pre>${isCmd ? esc(ev.diff) : diffHtml(ev.diff)}</pre><div class="btns"><button class="btn go" data-a="allow">Allow</button><button class="btn" data-a="always">Always allow this session</button><button class="btn" data-a="deny">Deny</button></div>`;
   if (!isCmd) el.querySelector("code").textContent = ev.target;
   el.querySelector(".btns").onclick = (e) => {
@@ -261,8 +265,15 @@ function showWelcome() {
   if (!S.ollama) banner = `<div class="banner"><b>Ollama isn't running.</b><br>Forge runs models locally through Ollama. If it's installed, it should start in a few seconds; otherwise get it from <a href="https://ollama.com/download" target="_blank" rel="noopener">ollama.com</a>.</div>`;
   else if (!installed.length) banner = `<div class="banner"><b>No models installed yet.</b><br>Download a model to get started (about 5 GB).<br><button class="btn go" id="dlDefault">Download qwen3:8b</button><div class="bar-prog" id="pullProg" ${S.pulling ? "" : "hidden"}><i></i></div></div>`;
   else if (!installed.includes(S.model)) banner = `<div class="banner"><b>${esc(S.model)} isn't installed.</b><br>Pick one of your installed models below the chat box, or download it.<br><button class="btn go" id="dlDefault">Download ${esc(S.model)}</button></div>`;
-  el.innerHTML = `<div class="logo big">F</div><h1>What should we build?</h1><p>Your local coding agent. It can read and edit files, run commands and search the web, all on this PC.</p>${banner}<div class="sugg">${SUGGEST.map((s, i) => `<button data-i="${i}"><b>${s[0]}</b><span>${s[1]}</span></button>`).join("")}</div>`;
+  let pyrightHint = "";
+  if (S.pyright === false && localStorage.getItem("forge.pyrightHintDismissed") !== "1") pyrightHint = `<div class="banner"><b>Python code tools need Pyright.</b><br>Install it once, then restart Forge: <code>npm install --global pyright</code> (needs <a href="https://nodejs.org" target="_blank" rel="noopener">Node.js</a>).<br><button class="btn" id="pyCopy">Copy command</button> <button class="btn" id="pyDismiss">Don't show again</button></div>`;
+  el.innerHTML = `<div class="logo big">F</div><h1>What should we build?</h1><p>Your local coding agent. It can read and edit files, run commands and search the web, all on this PC.</p>${banner}${pyrightHint}<div class="sugg">${SUGGEST.map((s, i) => `<button data-i="${i}"><b>${s[0]}</b><span>${s[1]}</span></button>`).join("")}</div>`;
   el.querySelector(".sugg").onclick = (e) => { const b = e.target.closest("button"); if (b) { input.value = SUGGEST[+b.dataset.i][1]; autosize(); input.focus(); } };
+  const pyCopy = el.querySelector("#pyCopy");
+  if (pyCopy) {
+    pyCopy.onclick = () => { navigator.clipboard.writeText("npm install --global pyright"); pyCopy.textContent = "Copied"; };
+    el.querySelector("#pyDismiss").onclick = () => { localStorage.setItem("forge.pyrightHintDismissed", "1"); pyCopy.closest(".banner").remove(); };
+  }
   const dl = el.querySelector("#dlDefault");
   if (dl) dl.onclick = () => api("/api/command", { cmd: "pull", arg: S.model || "qwen3:8b" });
   chat.appendChild(el); welcomeEl = el;

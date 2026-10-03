@@ -60,6 +60,7 @@ header { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border
 .sugg span { color: var(--dim); font-size: 12.5px; }
 .banner { background: var(--raised); border: 1px solid var(--border); border-left: 3px solid var(--yellow); border-radius: 8px; padding: 12px 14px; margin-bottom: 16px; text-align: left; }
 .banner button { margin-top: 8px; }
+.banner code { font: 12px var(--mono); background: var(--code); padding: 1px 6px; border-radius: 4px; }
 .bar-prog { height: 6px; background: var(--input); border-radius: 4px; overflow: hidden; margin-top: 8px; }
 .bar-prog i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .3s; }
 

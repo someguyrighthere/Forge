@@ -1,4 +1,5 @@
 """Read-only Python code intelligence through the Pyright language server."""
+import ast
 import atexit
 import json
 import os
@@ -46,6 +47,15 @@ def _server_command() -> list[str]:
             "If needed, set PYRIGHT_LANGSERVER to the full path of pyright-langserver."
         )
     return [executable, "--stdio"]
+
+
+def pyright_available() -> bool:
+    """True when the Pyright language server can be found (used to show a setup hint in the window)."""
+    try:
+        _server_command()
+        return True
+    except RuntimeError:
+        return False
 
 
 def _uri_path(uri: str) -> Path:
@@ -377,6 +387,45 @@ def python_definition(path: str, line: int | None = None, column: int | None = N
             lines.append(_location_text(location) + (f"  {snippet}" if snippet else ""))
         return _clip("\n".join(lines) or f"Pyright found no {kind} for that position.")
     return _with_document(path, inspect)
+
+
+def python_module_usage(path: str, module: str) -> str:
+    """List the names a Python file uses from another module, with line numbers."""
+    file_path, source = _open(path)
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as error:
+        return f"Error: {file_path.name} has a syntax error: {error}"
+    target = module.strip().removesuffix(".py").replace("\\", ".").replace("/", ".")
+    short = target.split(".")[-1]
+    aliases: set[str] = set()          # local names bound to the module object itself
+    direct: dict[str, str] = {}        # local name -> name imported with "from module import name"
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for item in node.names:
+                if item.name == target:
+                    aliases.add(item.asname or item.name.split(".")[0])
+        elif isinstance(node, ast.ImportFrom):
+            origin = node.module or ""
+            for item in node.names:
+                if origin == target or origin.endswith("." + target):
+                    direct[item.asname or item.name] = item.name
+                elif item.name == short:
+                    aliases.add(item.asname or item.name)  # "from package import module"
+    if not aliases and not direct:
+        return f"{file_path.name} does not import {target!r}."
+    uses: dict[str, set[int]] = {name: set() for name in direct.values()}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id in aliases:
+            uses.setdefault(node.attr, set()).add(node.lineno)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in direct:
+            uses[direct[node.id]].add(node.lineno)
+    lines = [f"{file_path.name} uses {len(uses)} name(s) from {target}:"]
+    for name in sorted(uses):
+        where = sorted(uses[name])
+        lines.append(f"  {name}: " + (", ".join(f"line {n}" for n in where[:8]) + (" ..." if len(where) > 8 else "")
+                                      if where else "imported but never used"))
+    return _clip("\n".join(lines))
 
 
 def python_references(path: str, line: int | None = None, column: int | None = None,

@@ -41,6 +41,14 @@ def test_locator_finds_symbols_by_name():
         python_intelligence._locator(None, None, None)
 
 
+def test_pyright_availability_is_reported(monkeypatch):
+    monkeypatch.delenv("PYRIGHT_LANGSERVER", raising=False)
+    monkeypatch.setattr(python_intelligence.shutil, "which", lambda _: None)
+    assert python_intelligence.pyright_available() is False
+    monkeypatch.setattr(python_intelligence.shutil, "which", lambda name: "C:/npm/pyright-langserver.cmd")
+    assert python_intelligence.pyright_available() is True
+
+
 def test_python_position_uses_one_based_coordinates():
     assert python_intelligence._position(1, 1) == {"line": 0, "character": 0}
     with pytest.raises(ValueError, match="1-based"):

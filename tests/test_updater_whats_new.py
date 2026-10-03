@@ -30,8 +30,10 @@ def test_existing_user_without_a_marker_is_treated_as_upgraded(home):
 
 def test_upgrade_is_announced_until_acknowledged(home):
     (home / "last_version").write_text("1.1.0", encoding="utf-8")
-    assert updater.pending_whats_new()["version"] == "1.1.1"
-    assert updater.pending_whats_new()["version"] == "1.1.1"  # still pending if the window was never confirmed
+    pending = updater.pending_whats_new()
+    assert pending and pending["version"] == "1.1.1"
+    pending = updater.pending_whats_new()
+    assert pending and pending["version"] == "1.1.1"  # still pending if the window was never confirmed
     updater.mark_seen()
     assert updater.pending_whats_new() is None
 
@@ -49,7 +51,8 @@ def test_check_returns_the_full_release_notes(monkeypatch):
     release = {"tag_name": "v9.0.0", "body": notes, "assets": [
         {"name": "Forge-Setup-9.0.0.exe", "browser_download_url": "https://github.com/x/y/a.exe", "digest": "sha256:ab"}]}
     monkeypatch.setattr(updater.urllib.request, "urlopen", lambda *a, **k: io.BytesIO(json.dumps(release).encode()))
-    assert updater.check()["notes"] == notes  # was cut off at 600 characters before
+    info = updater.check()
+    assert info and info["notes"] == notes  # was cut off at 600 characters before
 
 
 def test_release_notes_for_a_version_tolerate_failures(monkeypatch):

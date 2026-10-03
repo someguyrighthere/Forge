@@ -9,6 +9,7 @@ import urllib.request
 from pathlib import Path
 
 from forge.browser import browser_read
+from forge.browser_session import browser_click, browser_close, browser_open, browser_type
 from forge.github import github_actions, github_issues, github_prs
 from forge.notebook import apply_edit as _apply_notebook_edit
 from forge.notebook import notebook_read, outline
@@ -18,8 +19,10 @@ from forge.python_intelligence import (
     python_definition,
     python_diagnostics,
     python_hover,
+    python_module_usage,
     python_references,
-    python_rename_impact,    python_symbols,
+    python_rename_impact,
+    python_symbols,
 )
 
 MAX_OUTPUT = 8000
@@ -306,6 +309,9 @@ TOOLS = [
     schema("python_call_hierarchy", "List Pyright-resolved callers and/or callees of a Python function or method. "
                                     + TARGET_HELP,
            {**LOCATION, "direction": {"type": "string", "enum": ["incoming", "outgoing", "both"]}}, ["path"]),
+    schema("python_module_usage", "List exactly which names a Python file uses from another module, with line numbers "
+                                  "(e.g. path='tool_workflow.py', module='project_workflow'). Use this to answer 'how does A use B'.",
+           {"path": S, "module": S}, ["path", "module"]),
     schema("python_diagnostics", "Get Pyright type and code diagnostics for a Python file.",
            {"path": S}, ["path"]),
     schema("python_debug", "Run a Python script under a debugger and report what it saw: at each breakpoint the call "
@@ -328,6 +334,18 @@ TOOLS = [
     schema("browser_read", "Open a web page in a headless browser, run its JavaScript, and return the rendered text and "
                            "links. Use when web_fetch returns an empty or 'loading' page (single-page apps). Read-only.",
            {"url": S, "wait_seconds": {"type": "integer"}}, ["url"]),
+    schema("browser_open", "Open a web page in an interactive browser session and list its numbered clickable elements "
+                           "(links, buttons, text boxes). Needs Playwright (the tool explains setup if it is missing). "
+                           "Use browser_click and browser_type with those numbers; numbers change after every page change.",
+           {"url": S}, ["url"]),
+    schema("browser_click", "Click element [index] from the latest browser_open/browser_click/browser_type listing. "
+                            "Returns the updated page. Asks the user for approval.",
+           {"index": {"type": "integer"}}, ["index"]),
+    schema("browser_type", "Type text into text box [index] from the latest page listing. submit=true presses Enter, which "
+                           "only works on real forms: if the page did not change, click its Search/Submit button instead. "
+                           "Returns the updated page. Asks the user for approval.",
+           {"index": {"type": "integer"}, "text": S, "submit": {"type": "boolean"}}, ["index", "text"]),
+    schema("browser_close", "Close the interactive browser session when you are done with it.", {}, []),
     schema("github_prs", "List a GitHub repository's pull requests, or with number show one pull request including "
                          "changed files and failing CI checks. repo is 'owner/name' (default: this project's git origin).",
            {"repo": S, "number": {"type": "integer"}, "state": {"type": "string", "enum": ["open", "closed", "all"]},
@@ -354,10 +372,13 @@ TOOLS = [
 IMPLS = {f.__name__: f for f in (read_file, write_file, edit_file, notebook_read, notebook_edit, list_dir, glob_files, grep,
                                   python_symbols, python_hover, python_definition, python_references,
                                   python_call_hierarchy, python_rename_impact,
-                                  python_diagnostics, python_debug, github_prs, github_issues, github_actions,
-                                  run_command, web_search, web_fetch, browser_read, todo)}
-NEEDS_APPROVAL = {"write_file", "edit_file", "notebook_edit", "run_command", "python_debug"}
+                                  python_module_usage, python_diagnostics, python_debug, github_prs, github_issues,
+                                  github_actions,
+                                  run_command, web_search, web_fetch, browser_read, browser_open, browser_click,
+                                  browser_type, browser_close, todo)}
+NEEDS_APPROVAL = {"write_file", "edit_file", "notebook_edit", "run_command", "python_debug", "browser_click", "browser_type"}
 READ_ONLY = {"read_file", "list_dir", "glob_files", "grep", "python_symbols", "python_hover",
              "python_definition", "python_references", "python_rename_impact", "python_call_hierarchy",
-             "python_diagnostics", "github_prs", "github_issues", "github_actions", "notebook_read", "browser_read",
+             "python_module_usage", "python_diagnostics", "github_prs", "github_issues", "github_actions", "notebook_read",
+             "browser_read", "browser_open", "browser_close",
              "web_search", "web_fetch", "todo", "task"}

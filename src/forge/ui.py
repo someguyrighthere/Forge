@@ -10,11 +10,12 @@ from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.text import Text
 
-from forge import notebook, tools
+from forge import browser_session, notebook, tools
 
 for _stream in (sys.stdout, sys.stderr):
-    if hasattr(_stream, "reconfigure"):
-        _stream.reconfigure(encoding="utf-8", errors="replace")
+    _reconfigure = getattr(_stream, "reconfigure", None)
+    if _reconfigure:
+        _reconfigure(encoding="utf-8", errors="replace")
 
 console = Console()
 
@@ -27,15 +28,17 @@ def describe_call(name: str, args: dict) -> str:
     if name == "python_debug":
         return str(args.get("script", ""))
     if name.startswith("python_"):
-        return f"{args.get('path', '')} {args.get('symbol', '')}".strip()
+        return f"{args.get('path', '')} {args.get('symbol') or args.get('module') or ''}".strip()
     if name.startswith("github_"):
         target = args.get("repo") or ""
         item = args.get("number") or args.get("run_id") or args.get("query") or ""
         return f"{target} {'#' if args.get('number') or args.get('run_id') else ''}{item}".strip()
     if name in ("glob_files", "grep"):
         return f"{args.get('pattern', '')} in {args.get('path', '.')}"
-    if name in ("web_fetch", "browser_read"):
+    if name in ("web_fetch", "browser_read", "browser_open"):
         return str(args.get("url", ""))
+    if name in ("browser_click", "browser_type"):
+        return browser_session.describe_action(name, args)
     if name == "web_search":
         return str(args.get("query", ""))
     if name == "task":
@@ -82,6 +85,8 @@ def diff_text(name: str, args: dict) -> str:
         parts += [f"breakpoint: {b}" for b in args.get("breakpoints") or []]
         parts += [f"evaluate: {e}" for e in args.get("expressions") or []]
         return "\n".join(parts)
+    if name in ("browser_click", "browser_type"):
+        return browser_session.describe_action(name, args)
     return str(args.get("command", ""))
 
 
@@ -105,7 +110,7 @@ class Approver:
         return self.ask(name, args)
 
     def ask(self, name: str, args: dict) -> bool:
-        lang = {"run_command": "powershell", "python_debug": "text"}.get(name, "diff")
+        lang = {"run_command": "powershell", "python_debug": "text", "browser_click": "text", "browser_type": "text"}.get(name, "diff")
         console.print(Panel(Syntax(diff_text(name, args), lang, theme="ansi_dark"),
                             title=f"[yellow]{name}[/] {describe_call(name, args)}", border_style="yellow"))
         while True:

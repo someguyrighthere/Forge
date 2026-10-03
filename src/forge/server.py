@@ -15,7 +15,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from forge import config, llm, tools, ui, updater
+from forge import config, llm, python_intelligence, tools, ui, updater
 from forge.agent import compact, expand_mentions, run_turn, system_prompt
 
 WEB = Path(__file__).parent / "web"
@@ -237,7 +237,7 @@ class App:
         self.update_info: dict | None = None
         self._update: dict | None = None
         self.whats_new: dict | None = None
-        self.window = None
+        self.window: subprocess.Popen | None = None
         self.models: list[dict] = []
         self.ollama_ok = False
 
@@ -256,7 +256,7 @@ class App:
             "ollama": self.ollama_ok, "pulling": self.pulling, "sessionId": self.state["id"],
             "models": [{"name": m["name"], "size": m.get("size", 0)} for m in self.models],
             "recent": self.recent(), "version": updater.__version__, "update": self.update_info,
-            "whatsNew": self.whats_new,
+            "whatsNew": self.whats_new, "pyright": python_intelligence.pyright_available(),
         }
 
     def push_state(self) -> None:
@@ -532,7 +532,7 @@ class Handler(BaseHTTPRequestHandler):
     token: str
     port: int
 
-    def log_message(self, *args):
+    def log_message(self, format: str, *args) -> None:
         pass
 
     def reply(self, code: int, body: bytes, ctype: str) -> None:
