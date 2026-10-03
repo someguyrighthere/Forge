@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Forge</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="/favicon.ico">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div id="app">
+  <aside id="side">
+    <div class="brand"><span class="logo">F</span><span>Forge</span><span class="ver" id="ver"></span></div>
+    <button class="primary wide" id="newChat">＋ New chat</button>
+    <div class="sec">Recent</div>
+    <div id="sessions" class="sessions"></div>
+    <div class="grow"></div>
+    <button class="ghost wide" id="memBtn">🧠 Memory</button>
+  </aside>
+  <main>
+    <header>
+      <button class="icon" id="toggleSide" title="Toggle sidebar">☰</button>
+      <button class="chip" id="folderBtn" title="Project folder">📁 <span id="folderName">Choose folder</span></button>
+      <div class="grow"></div>
+      <span class="dot" id="dot" title=""></span>
+    </header>
+    <div id="scroll">
+      <div id="chat"></div>
+    </div>
+    <div id="dock">
+      <div id="todo" hidden></div>
+      <div id="menu" hidden></div>
+      <div id="composer">
+        <textarea id="input" rows="1" placeholder="Ask Forge anything…  /  commands,  @  files" spellcheck="false"></textarea>
+        <div class="bar">
+          <button class="icon" id="attach" title="Attach a file (@)">@</button>
+          <button class="pill" id="modeBtn" title="Mode (Shift+Tab)"></button>
+          <button class="pill" id="modelBtn" title="Model"></button>
+          <div class="grow"></div>
+          <div id="ctx" title="Context window used"><div class="meter"><i id="ctxFill"></i></div><span id="ctxText"></span></div>
+          <button id="send" class="sendbtn" title="Send (Enter)">↑</button>
+        </div>
+      </div>
+      <div class="hint">Forge runs locally on your PC with Ollama. Enter to send · Shift+Enter for a new line · Esc to stop</div>
+    </div>
+  </main>
+</div>
+<div id="modal" hidden></div>
+<script src="/app.js"></script>
+</body>
+</html>

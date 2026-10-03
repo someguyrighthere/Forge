@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "forge-agent"
+dynamic = ["version"]
+description = "A local, Claude-Code-style coding agent for the terminal, powered by Ollama."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["rich>=13", "prompt_toolkit>=3"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+forge = "forge.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+forge = ["web/*"]
+
+[tool.setuptools.dynamic]
+version = {attr = "forge.version.__version__"}
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+[project.gui-scripts]
+forge-app = "forge.server:run"

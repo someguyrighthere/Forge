@@ -1,0 +1,12 @@
+# Build outputs (rebuilt with build.ps1)
+build/
+dist/
+installer/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
