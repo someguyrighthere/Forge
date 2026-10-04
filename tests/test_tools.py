@@ -1,4 +1,9 @@
 import json
+import tempfile
+import threading
+import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 from forge import llm, tools
 
@@ -17,6 +22,69 @@ def test_user_deny():
         assert tools.is_blocked("npm publish")
     finally:
         tools.USER_DENY.clear()
+
+
+class WorkspaceRestrictionTests(unittest.TestCase):
+    def test_resolve_rejects_paths_outside_the_configured_workspace(self):
+        root = Path.cwd().resolve()
+        with patch.object(tools, "WORKSPACE_ROOT", root):
+            self.assertEqual(tools.resolve("inside.txt"), root / "inside.txt")
+            with self.assertRaisesRegex(ValueError, "outside the allowed workspace"):
+                tools.resolve(str(root.parent / "outside.txt"))
+
+    def test_grep_rejects_a_file_that_resolves_outside_the_workspace(self):
+        root = Path.cwd().resolve()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            outside = Path(temp_dir) / "outside.txt"
+            outside.write_text("secret", encoding="utf-8")
+            with (
+                patch.object(tools, "WORKSPACE_ROOT", root),
+                patch.object(tools, "_walk", return_value=iter([outside])),
+            ):
+                result = tools.grep("secret", str(root))
+
+        self.assertIn("outside the allowed workspace", result)
+
+    def test_agent_exposes_only_workspace_file_and_todo_tools(self):
+        from forge import agent, ui
+
+        available = set()
+
+        class Stream:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def update(self, *args):
+                pass
+
+            def first_token(self):
+                pass
+
+            def finish(self, *args):
+                pass
+
+        class View:
+            def stream(self):
+                return Stream()
+
+        def chat(_model, _messages, schemas, _ctx, _think, **kwargs):
+            available.update(schema["function"]["name"] for schema in schemas)
+            return "done", [], {"in": 1, "out": 1}, False
+
+        messages = [{"role": "system", "content": ""}, {"role": "user", "content": "build"}]
+        cfg = {"model": "test", "num_ctx": 1000, "think": False, "max_steps": 1}
+        with (
+            patch.object(tools, "WORKSPACE_ROOT", Path.cwd()),
+            patch.object(agent.llm, "CANCEL", threading.Event()),
+            patch.object(agent.llm, "chat", side_effect=chat),
+        ):
+            agent.run_turn(cfg, messages, ui.Approver("ask", []), View())
+
+        self.assertEqual(available, tools.WORKSPACE_TOOLS)
+
 
 
 def test_edit_and_undo(tmp_path):

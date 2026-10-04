@@ -29,6 +29,8 @@ from forge.python_intelligence import (
 MAX_OUTPUT = 8000
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".expo", ".mypy_cache", ".pytest_cache"}
 USER_AGENT = "Mozilla/5.0 (forge-agent)"
+WORKSPACE_ROOT = Path(os.environ["FORGE_WORKSPACE_ROOT"]).resolve() if os.environ.get("FORGE_WORKSPACE_ROOT") else None
+WORKSPACE_TOOLS = {"read_file", "write_file", "edit_file", "list_dir", "glob_files", "grep", "todo"}
 
 # Extra regexes from config.toml; set by the CLI at startup.
 USER_DENY: list[str] = []
@@ -55,7 +57,10 @@ def clip(text: str, limit: int = MAX_OUTPUT) -> str:
 
 
 def resolve(path: str) -> Path:
-    return Path(os.path.expanduser(path)).resolve()
+    resolved = Path(os.path.expanduser(path)).resolve()
+    if WORKSPACE_ROOT is not None and not resolved.is_relative_to(WORKSPACE_ROOT):
+        raise ValueError(f"Path is outside the allowed workspace: {resolved}")
+    return resolved
 
 
 def is_blocked(command: str) -> bool:
@@ -175,11 +180,14 @@ def grep(pattern: str, path: str = ".", file_glob: str = "*") -> str:
     hits = []
     for f in files:
         try:
-            for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+            safe_file = resolve(str(f))
+            for n, line in enumerate(safe_file.read_text(encoding="utf-8").splitlines(), 1):
                 if rx.search(line):
-                    hits.append(f"{f}:{n}: {line.strip()[:200]}")
+                    hits.append(f"{safe_file}:{n}: {line.strip()[:200]}")
                     if len(hits) >= 100:
                         return "\n".join(hits) + "\n... (stopped at 100 matches)"
+        except ValueError as error:
+            return f"Error: {error}"
         except (UnicodeDecodeError, OSError):
             continue
     return "\n".join(hits) or "No matches."

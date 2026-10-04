@@ -56,6 +56,13 @@ def system_prompt(mode: str = "auto") -> str:
         "Do not call a tool unless it helps with the request. "
         "Be brief. When you finish, summarise what you did in a sentence or two.\n"
         f"Operating system: {platform.system()}. Working directory: {Path.cwd()}." + git_summary() + extra
+        + (
+            "\n\nSARA BUILD SESSION RESTRICTIONS: Use only read_file, write_file, edit_file, list_dir, "
+            "glob_files, grep, and todo. File paths are restricted to this workspace. Shell commands, "
+            "Python execution/debugging, browser and web tools, GitHub, and sub-agents are unavailable. "
+            "Do not try to work around these restrictions."
+            if tools.WORKSPACE_ROOT is not None else ""
+        )
     )
 
 
@@ -113,9 +120,14 @@ def run_turn(cfg: dict, messages: list, approver: ui.Approver, view, used: int =
              max_steps: int = 0) -> dict:
     """Run the model until it stops calling tools. Returns the last token usage."""
     plan = approver.mode == "plan"
-    allowed = tools.READ_ONLY if plan or depth else set(tools.IMPLS) | {"task"}
-    if depth:
-        allowed = allowed - {"task"}
+    if tools.WORKSPACE_ROOT is not None:
+        allowed = set(tools.WORKSPACE_TOOLS)
+        if plan or depth:
+            allowed -= {"write_file", "edit_file"}
+    else:
+        allowed = tools.READ_ONLY if plan or depth else set(tools.IMPLS) | {"task"}
+        if depth:
+            allowed = allowed - {"task"}
     schemas = [t for t in tools.TOOLS if t["function"]["name"] in allowed]
     usage = {"in": used, "out": 0}
     for _ in range(max_steps or cfg["max_steps"]):
