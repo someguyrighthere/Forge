@@ -4,11 +4,13 @@ A local, Claude-Code-style coding agent with a desktop app (chat window) and a t
 
 ## Install (Windows)
 
-Run `installer\Forge-Setup-1.0.0.exe`. It installs Forge for your user (no admin needed, no Python needed), adds Start Menu and optional desktop shortcuts that open the Forge window (`forge-app.exe`, which uses Microsoft Edge in app mode), and can add `forge` to your PATH. It offers to download the default model (`qwen3:8b`, 5.2 GB) if Ollama is installed. Uninstall from Windows Settings > Apps.
+Download `Forge-Setup-1.4.1.exe` from [GitHub Releases](https://github.com/someguyrighthere/Forge/releases/latest). It installs Forge for your user (no admin needed, no Python needed), adds Start Menu and optional desktop shortcuts that open the Forge window (`forge-app.exe`, which uses Microsoft Edge in app mode), and can add `forge` to your PATH. It offers to download the default model (`qwen3:8b`, 5.2 GB) if Ollama is installed. Uninstall from Windows Settings > Apps.
 
 The installer is not code-signed (that needs a paid certificate), so Windows SmartScreen may show "Windows protected your PC" the first time. Choose **More info**, then **Run anyway**. Installers downloaded by Forge's own updater are checked against the SHA-256 published on the GitHub release before they run.
 
 Rebuild the installer with `powershell -File build.ps1` (needs PyInstaller, Pillow and Inno Setup 6).
+For builds outside OneDrive, pass PyInstaller's `--workpath` and `--distpath`,
+then pass `/DPackageRoot=<absolute path to the built forge directory>` to Inno Setup.
 
 ## Releasing an update
 

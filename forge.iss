@@ -3,6 +3,9 @@
 #define AppVersion "1.0.0"
 #endif
 #define Model "qwen3:8b"
+#ifndef PackageRoot
+#define PackageRoot "dist\forge"
+#endif
 
 [Setup]
 AppId={{6F1B2C84-5D0A-4E3B-9C57-2A9E4B7D1F03}
@@ -29,7 +32,7 @@ Name: "getollama"; Description: "Download and install Ollama (required to run mo
 Name: "addpath"; Description: "Add Forge to PATH so you can type 'forge' in any terminal"; GroupDescription: "Command line:"
 
 [Files]
-Source: "dist\forge\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
+Source: "{#PackageRoot}\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
 Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
@@ -100,5 +103,4 @@ procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usPostUninstall then SetPath(False);
 end;
-
 
