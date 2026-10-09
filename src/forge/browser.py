@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import tempfile
 import urllib.parse
+import webbrowser
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -116,3 +117,46 @@ def browser_read(url: str, wait_seconds: int = 5) -> str:
         return f"Error: the browser returned nothing for {url} (exit code {run.returncode})."
     text = html_to_text(run.stdout, url)
     return text[:MAX_OUTPUT] + (f"\n... [truncated {len(text) - MAX_OUTPUT} characters]" if len(text) > MAX_OUTPUT else "")
+
+
+def open_preview(target: str) -> str:
+    """Open a project HTML file or localhost web app in the user's visible browser."""
+    target = target.strip()
+    if not target:
+        return "Error: provide a project HTML file or localhost URL to preview."
+
+    if "://" in target:
+        parsed = urllib.parse.urlsplit(target)
+        if parsed.scheme not in ("http", "https") or parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
+            return "Error: previews may only open HTTP(S) URLs served from localhost."
+        if parsed.username or parsed.password:
+            return "Error: preview URLs cannot contain credentials."
+        try:
+            parsed.port
+        except ValueError:
+            return "Error: preview URL has an invalid port."
+        url = target
+    else:
+        root = Path.cwd().resolve()
+        path = Path(target)
+        if not path.is_absolute():
+            path = root / path
+        try:
+            path = path.resolve(strict=True)
+            path.relative_to(root)
+        except (OSError, ValueError):
+            return "Error: preview files must exist inside the current project folder."
+        if path.is_dir():
+            path = next((candidate for candidate in (path / "index.html", path / "index.htm")
+                         if candidate.is_file()), path)
+        if not path.is_file() or path.suffix.lower() not in {".html", ".htm"}:
+            return "Error: choose an existing HTML file (or a folder containing index.html)."
+        url = path.as_uri()
+
+    try:
+        opened = webbrowser.open(url, new=2)
+    except OSError as error:
+        return f"Error: could not open the preview in your browser: {error}"
+    if not opened:
+        return "Error: the system could not open the preview in a browser."
+    return f"Opened the preview in your browser: {url}"

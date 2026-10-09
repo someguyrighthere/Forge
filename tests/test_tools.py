@@ -46,6 +46,46 @@ def test_run_command():
     assert "blocked" in tools.run_command("git reset --hard")
 
 
+def test_open_preview_opens_project_html_in_the_visible_browser(tmp_path, monkeypatch):
+    from forge import browser
+
+    (tmp_path / "index.html").write_text("<h1>Preview</h1>", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    opened = []
+    monkeypatch.setattr(browser.webbrowser, "open", lambda url, new: opened.append((url, new)) or True)
+
+    result = tools.open_preview(".")
+
+    assert result.startswith("Opened the preview in your browser:")
+    assert opened == [((tmp_path / "index.html").as_uri(), 2)]
+
+
+def test_open_preview_accepts_localhost_urls_but_rejects_remote_urls(monkeypatch):
+    from forge import browser
+
+    opened = []
+    monkeypatch.setattr(browser.webbrowser, "open", lambda url, new: opened.append((url, new)) or True)
+
+    assert "Opened the preview" in tools.open_preview("http://127.0.0.1:62008/")
+    assert "only open HTTP(S) URLs served from localhost" in tools.open_preview("https://example.com/")
+
+    assert opened == [("http://127.0.0.1:62008/", 2)]
+
+
+def test_open_preview_rejects_files_outside_the_project(tmp_path, monkeypatch):
+    from forge import browser
+
+    project = tmp_path / "project"
+    outside = tmp_path / "outside.html"
+    project.mkdir()
+    outside.write_text("<h1>Outside</h1>", encoding="utf-8")
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(browser.webbrowser, "open", lambda *args, **kwargs: True)
+
+    assert "inside the current project folder" in tools.open_preview(str(outside))
+    assert "must exist inside the current project folder" in tools.open_preview("../outside.html")
+
+
 def test_text_tool_call_parser():
     known = {"read_file", "run_command"}
     text = json.dumps({"name": "read_file", "arguments": {"path": "x"}})

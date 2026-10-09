@@ -8,7 +8,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from forge.browser import browser_read
+from forge.browser import browser_read, open_preview
 from forge.browser_session import browser_click, browser_close, browser_open, browser_type
 from forge.github import github_actions, github_issues, github_prs
 from forge.notebook import apply_edit as _apply_notebook_edit
@@ -334,6 +334,11 @@ TOOLS = [
     schema("browser_read", "Open a web page in a headless browser, run its JavaScript, and return the rendered text and "
                            "links. Use when web_fetch returns an empty or 'loading' page (single-page apps). Read-only.",
            {"url": S, "wait_seconds": {"type": "integer"}}, ["url"]),
+    schema("open_preview", "Show the user's project UI in a visible browser window. Open an existing HTML file or a "
+                           "localhost HTTP(S) URL for a development server. For a web app, inspect its instructions "
+                           "and start its dev server with run_command if needed, then call this with the localhost URL. "
+                           "Only project HTML files and localhost URLs are allowed.",
+           {"target": S}, ["target"]),
     schema("browser_open", "Open a web page in an interactive browser session and list its numbered clickable elements "
                            "(links, buttons, text boxes). Needs Playwright (the tool explains setup if it is missing). "
                            "Use browser_click and browser_type with those numbers; numbers change after every page change.",
@@ -374,11 +379,12 @@ IMPLS = {f.__name__: f for f in (read_file, write_file, edit_file, notebook_read
                                   python_call_hierarchy, python_rename_impact,
                                   python_module_usage, python_diagnostics, python_debug, github_prs, github_issues,
                                   github_actions,
-                                  run_command, web_search, web_fetch, browser_read, browser_open, browser_click,
+                                  run_command, web_search, web_fetch, browser_read, open_preview, browser_open, browser_click,
                                   browser_type, browser_close, todo)}
 NEEDS_APPROVAL = {"write_file", "edit_file", "notebook_edit", "run_command", "python_debug", "browser_click", "browser_type"}
 READ_ONLY = {"read_file", "list_dir", "glob_files", "grep", "python_symbols", "python_hover",
              "python_definition", "python_references", "python_rename_impact", "python_call_hierarchy",
              "python_module_usage", "python_diagnostics", "github_prs", "github_issues", "github_actions", "notebook_read",
              "browser_read", "browser_open", "browser_close",
+             "open_preview",
              "web_search", "web_fetch", "todo", "task"}
