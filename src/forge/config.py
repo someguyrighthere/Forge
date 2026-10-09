@@ -16,7 +16,6 @@ DEFAULTS = {
     "num_ctx": 16384,
     "mode": "auto",       # auto = run everything, ask = confirm edits and commands, plan = read-only
     "think": False,       # let reasoning models (qwen3) think before answering
-    "max_steps": 25,
     "allow": [],          # regexes of commands that never need confirmation in ask mode
     "deny": [],           # regexes of commands that are always refused
 }
@@ -27,7 +26,6 @@ model = "qwen3:8b"
 num_ctx = 16384
 mode = "auto"        # auto | ask | plan
 think = false
-max_steps = 25
 
 # Regexes matched against shell commands.
 allow = ["^git (status|diff|log)", "^(ls|dir|pytest|python -m pytest)"]

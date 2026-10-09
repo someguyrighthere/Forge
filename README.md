@@ -38,6 +38,7 @@ forge --gui                open the desktop window
 
 - **Tools:** read, write and edit files (with diffs), list, glob, grep, run shell commands, web search, fetch pages, a todo list, and a read-only research sub-agent (`task`).
 - **Modes:** `auto` (default), `ask` (confirm edits and commands, with "always this session"), `plan` (read-only). Shift+Tab cycles them.
+- **Live progress:** the desktop app shows the current action, target, elapsed time, and tool-call count; repeated operations on the same file are grouped. User turns continue until Forge finishes; press Esc or Stop to cancel.
 - **Safety:** destructive commands (recursive deletes of drives or home, format, shutdown, `git reset --hard`, force push, ...) are always refused. Add your own regexes under `deny` in the config. `/undo` reverts the last file edits.
 - **Memory:** `/remember <note>` is injected into every session. An `AGENT.md` in the project folder is loaded automatically (`/init` writes one). The git status is included in the prompt.
 - **Python code intelligence:** Pyright-backed tools provide symbols, inferred types and documentation, go-to-definition, references, rename-impact preview, call hierarchy, and diagnostics in both the terminal and desktop app. `python_module_usage` lists exactly which names one file uses from another module. These read-only tools are also available in plan mode, and the window shows a one-time hint if Pyright isn't installed.

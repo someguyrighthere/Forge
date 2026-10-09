@@ -113,7 +113,7 @@ def run_subagent(cfg: dict, prompt: str, view) -> str:
 
 
 def run_turn(cfg: dict, messages: list, approver: ui.Approver, view, used: int = 0, depth: int = 0,
-             max_steps: int = 0) -> dict:
+             max_steps: int | None = None) -> dict:
     """Run the model until it stops calling tools. Returns the last token usage."""
     plan = approver.mode == "plan"
     allowed = tools.READ_ONLY if plan or depth else set(tools.IMPLS) | {"task"}
@@ -121,9 +121,11 @@ def run_turn(cfg: dict, messages: list, approver: ui.Approver, view, used: int =
         allowed = allowed - {"task"}
     schemas = [t for t in tools.TOOLS if t["function"]["name"] in allowed]
     usage = {"in": used, "out": 0}
-    for _ in range(max_steps or cfg["max_steps"]):
+    steps = 0
+    while max_steps is None or steps < max_steps:
         if llm.CANCEL.is_set():
             raise llm.Cancelled()
+        steps += 1
         if not depth and usage["in"] + usage["out"] > cfg["num_ctx"] * COMPACT_AT:
             compact(cfg, messages, view)
             usage = {"in": 0, "out": 0}
@@ -166,8 +168,6 @@ def run_turn(cfg: dict, messages: list, approver: ui.Approver, view, used: int =
                 raise llm.Cancelled()
             view.result(name, result, depth)
             messages.append({"role": "tool", "tool_name": name, "content": result})
-    if not depth:
-        view.notice(f"Stopped after {cfg['max_steps']} steps. Send a message to continue.", "warn")
-    else:
+    if depth:
         messages.append({"role": "assistant", "content": "(sub-agent ran out of steps)"})
     return usage

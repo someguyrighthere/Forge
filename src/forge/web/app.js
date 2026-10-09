@@ -5,6 +5,7 @@ const chat = $("#chat"), scroller = $("#scroll"), input = $("#input"), menu = $(
 const terminalPanel = $("#terminalPanel"), terminalOutput = $("#terminalOutput"), terminalInput = $("#terminalInput");
 const S = { model: "", mode: "auto", cwd: "", used: 0, ctx: 16384, busy: false, ollama: false, models: [], recent: [], pulling: null, sessionId: "" };
 let working = null, welcomeEl = null, lastSession = null, menuItems = [], menuSel = 0;
+let workStarted = 0, workTimer = 0, workCalls = 0, lastCallGroup = null;
 let terminalSeq = 0, terminalTimer = 0, terminalInFlight = false, terminalStarted = false, terminalErrorShown = "";
 const streams = {}, history = [];
 
@@ -120,7 +121,7 @@ const LABEL = {
   notebook_read: ["Reading notebook", "Read notebook"], notebook_edit: ["Editing notebook", "Edited notebook"],
   browser_read: ["Opening in browser", "Read in browser"],
   browser_open: ["Opening page", "Opened page"], browser_click: ["Clicking", "Clicked"], browser_type: ["Typing", "Typed"],
-  browser_close: ["Closing browser", "Closed browser"],
+  browser_close: ["Closing browser", "Closed browser"], open_preview: ["Opening preview", "Opened preview"],
   web_search: ["Searching the web", "Searched the web"], web_fetch: ["Fetching", "Fetched"], task: ["Researching", "Researched"],
 };
 
@@ -147,8 +148,69 @@ function targetOf(name, a) {
   return "";
 }
 
+function callGroupKey(ev) {
+  const target = targetOf(ev.name, ev.args || {});
+  if (!target) return `${ev.depth}:${ev.name}`;
+  const kind = ["read_file", "write_file", "edit_file", "list_dir", "notebook_read", "notebook_edit"].includes(ev.name)
+    ? "file" : ev.name;
+  return `${ev.depth}:${kind}:${target}`;
+}
+
+function updateGroupHead(group, ev, active) {
+  const label = LABEL[ev.name] || [ev.name, ev.name];
+  const failed = !active && /^Error|declined/.test(ev.result || "");
+  group.head.querySelector(".ico").className = "ico " + (active ? "spin" : failed ? "err" : "ok");
+  group.head.querySelector(".ico").textContent = active ? "" : failed ? "✗" : "✓";
+  group.head.querySelector(".group-label").textContent =
+    active ? label[0] : failed ? `${label[1]} failed` : label[1];
+  group.head.querySelector(".group-count").textContent =
+    `${group.count} ${group.count === 1 ? "step" : "steps"}`;
+}
+
+function groupCall(el, ev, key) {
+  const previous = lastCallGroup;
+  if (previous && previous.key === key) {
+    if (!previous.group) {
+      const groupEl = document.createElement("div");
+      groupEl.className = "call-group";
+      const head = document.createElement("button");
+      head.className = "call-group-head";
+      head.type = "button";
+      head.setAttribute("aria-expanded", "false");
+      head.title = targetOf(ev.name, ev.args || {});
+      head.innerHTML = '<span class="ico spin"></span><span class="group-label"></span><code class="tgt"></code><span class="group-count"></span><span class="chev">›</span>';
+      const target = targetOf(ev.name, ev.args || {});
+      head.querySelector(".tgt").textContent = target;
+      const steps = document.createElement("div");
+      steps.className = "call-group-steps";
+      steps.hidden = true;
+      head.onclick = () => {
+        const open = steps.hidden;
+        steps.hidden = !open;
+        head.setAttribute("aria-expanded", String(open));
+        groupEl.classList.toggle("open", open);
+      };
+      groupEl.append(head, steps);
+      previous.items[0].before(groupEl);
+      for (const item of previous.items) steps.appendChild(item);
+      previous.group = { el: groupEl, head, steps, count: previous.items.length };
+    }
+    previous.group.steps.appendChild(el);
+    previous.items.push(el);
+    previous.group.count++;
+    previous.latest = ev;
+    updateGroupHead(previous.group, ev, true);
+    return;
+  }
+
+  add(el);
+  lastCallGroup = { key, items: [el], group: null, latest: ev };
+}
+
 function addCall(ev) {
-  if (ev.name === "todo") return;
+  workCalls++;
+  if (ev.name === "todo") { updateWork("Updating the task list…", ""); return; }
+  updateWork("Calling a tool…", "");
   const el = document.createElement("div");
   el.className = "call" + (ev.depth ? " d1" : "");
   el.id = "c" + ev.id;
@@ -161,16 +223,26 @@ function addCall(ev) {
     if (body) { body.hidden = !body.hidden; el.classList.toggle("open", !body.hidden); }
   };
   el._ev = ev;
-  add(el);
+  const target = targetOf(ev.name, ev.args || {});
+  updateWork((LABEL[ev.name] || [ev.name])[0], target);
+  groupCall(el, ev, callGroupKey(ev));
 }
 
 function finishCall(ev) {
   const el = $("#c" + ev.id);
-  if (!el) return;
+  if (!el) {
+    if (ev.name === "todo") updateWork("Reviewing task progress…", "");
+    return;
+  }
   const a = (el._ev && el._ev.args) || {}, bad = /^Error|declined/.test(ev.result);
   const ico = el.querySelector(".ico");
   ico.className = "ico " + (bad ? "err" : "ok"); ico.textContent = bad ? "✗" : "✓";
   el.querySelector(".lbl").textContent = (LABEL[ev.name] || [ev.name, ev.name])[1];
+  if (lastCallGroup && lastCallGroup.key === callGroupKey(el._ev || ev) && lastCallGroup.group) {
+    lastCallGroup.latest = ev;
+    updateGroupHead(lastCallGroup.group, ev, false);
+  }
+  updateWork(bad ? "Adjusting after a tool error…" : "Reviewing results…", "");
   let html, open = false;
   if (ev.name === "edit_file" && !bad) {
     const o = (a.old_string || "").split("\n").map((l) => "- " + l), n = (a.new_string || "").split("\n").map((l) => "+ " + l);
@@ -220,20 +292,55 @@ function setBusy(v) {
   b.textContent = v ? "■" : "↑"; b.classList.toggle("stop", v); b.title = v ? "Stop (Esc)" : "Send (Enter)";
   if (v && !working) {
     working = document.createElement("div"); working.className = "working";
-    working.innerHTML = '<span class="ico spin"></span><span class="shim">Thinking…</span>';
+    working.innerHTML = '<div class="work-card"><div class="work-head"><span class="work-orbit"><i></i></span><div class="work-copy"><strong>Forge is working</strong><span class="work-stage" aria-live="polite">Thinking through the next step…</span></div><div class="work-stats"><span class="work-count" aria-hidden="true">0 tool calls</span><time class="work-time" aria-hidden="true">0:00</time></div></div><div class="work-track" aria-hidden="true"><i></i></div></div>';
     if (welcomeEl) { welcomeEl.remove(); welcomeEl = null; }
     chat.appendChild(working);
-  } else if (!v && working) { working.remove(); working = null; }
+    workStarted = Date.now();
+    workCalls = 0;
+    lastCallGroup = null;
+    workTimer = window.setInterval(updateWorkTime, 1000);
+    updateWorkTime();
+  } else if (!v && working) {
+    working.remove(); working = null;
+    window.clearInterval(workTimer); workTimer = 0;
+    workStarted = 0; lastCallGroup = null;
+  }
   keepBottom(() => {});
+}
+
+function updateWork(stage, target) {
+  if (!working) return;
+  const label = working.querySelector(".work-stage");
+  label.textContent = stage;
+  label.title = stage;
+  let detail = working.querySelector(".work-target");
+  if (target) {
+    if (!detail) {
+      detail = document.createElement("code");
+      detail.className = "work-target";
+      working.querySelector(".work-copy").appendChild(detail);
+    }
+    detail.textContent = target;
+    detail.title = target;
+  } else if (detail) detail.remove();
+  const count = working.querySelector(".work-count");
+  count.textContent = `${workCalls} ${workCalls === 1 ? "tool call" : "tool calls"}`;
+}
+
+function updateWorkTime() {
+  if (!working || !workStarted) return;
+  const seconds = Math.floor((Date.now() - workStarted) / 1000);
+  const time = working.querySelector(".work-time");
+  time.textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
 function handle(ev) {
   keepBottom(() => {
     switch (ev.type) {
-      case "reset": chat.innerHTML = ""; Object.keys(streams).forEach((k) => delete streams[k]); working = null; welcomeEl = null; renderTodos([]); showWelcome(); if (S.busy) setBusy(true); break;
-      case "user": addUser(ev.text); break;
-      case "assistant": setMd(botEl(), ev.text, false); break;
-      case "stream_start": botEl(ev.id); break;
+      case "reset": chat.innerHTML = ""; Object.keys(streams).forEach((k) => delete streams[k]); window.clearInterval(workTimer); workTimer = 0; workStarted = 0; workCalls = 0; working = null; lastCallGroup = null; welcomeEl = null; renderTodos([]); showWelcome(); if (S.busy) setBusy(true); break;
+      case "user": lastCallGroup = null; addUser(ev.text); break;
+      case "assistant": lastCallGroup = null; updateWork("Writing the response…", ""); setMd(botEl(), ev.text, false); break;
+      case "stream_start": lastCallGroup = null; updateWork("Writing the response…", ""); botEl(ev.id); break;
       case "stream": if (!streams[ev.id]) botEl(ev.id); setMd(streams[ev.id], ev.text, true); break;
       case "stream_end": { const el = streams[ev.id]; if (el) { ev.text ? setMd(el, ev.text, false) : el.remove(); delete streams[ev.id]; } break; }
       case "call": addCall(ev); break;
@@ -242,7 +349,7 @@ function handle(ev) {
       case "approval_done": { const el = $("#a" + ev.id); if (el) { el.classList.add("done"); el.querySelector(".st").textContent = ev.answer === "deny" ? "✗" : "✓"; el.querySelector(".ah span:nth-child(2)").textContent = ev.answer === "deny" ? "Denied" : ev.answer === "always" ? "Allowed for this session" : "Allowed"; } break; }
       case "todos": renderTodos(ev.items); break;
       case "notice": addNotice(ev.text, ev.level); break;
-      case "status": if (working) working.querySelector(".shim").textContent = ev.text || "Thinking…"; break;
+      case "status": updateWork(ev.text || "Thinking through the next step…", ""); break;
       case "busy": setBusy(ev.value); if (!ev.value) refreshSessions(); break;
       case "state": Object.assign(S, ev.state); renderState(); break;
       case "pull": renderPull(ev); break;
