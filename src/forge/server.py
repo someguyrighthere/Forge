@@ -12,6 +12,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
+from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -26,10 +27,151 @@ INIT_PROMPT = ("Explore this project (list files, read the main ones) and write 
                "Keep it under 40 lines.")
 MIME = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
         ".css": "text/css; charset=utf-8", ".ico": "image/x-icon", ".png": "image/png", ".svg": "image/svg+xml"}
+MAX_TERMINAL_OUTPUT = 256 * 1024
+MAX_TERMINAL_COMMAND = 8000
 
 
 def clip_args(args: dict, limit: int = 6000) -> dict:
     return {k: (v[:limit] if isinstance(v, str) else v) for k, v in args.items()}
+
+
+class TerminalSession:
+    """A user-started PowerShell session for the desktop window."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.process: subprocess.Popen | None = None
+        self.cwd = ""
+        self.output: deque[tuple[int, str]] = deque()
+        self.output_size = 0
+        self.sequence = 0
+        self.dropped_sequence = 0
+        self.error = ""
+        self.marker = "__FORGE_CWD_" + secrets.token_hex(8) + "__"
+
+    def _append(self, text: str) -> None:
+        if not text:
+            return
+        clipped = len(text) > MAX_TERMINAL_OUTPUT
+        if clipped:
+            text = text[-MAX_TERMINAL_OUTPUT:]
+        with self.lock:
+            self.sequence += 1
+            if clipped:
+                self.dropped_sequence = self.sequence
+            self.output.append((self.sequence, text))
+            self.output_size += len(text)
+            while self.output and self.output_size > MAX_TERMINAL_OUTPUT:
+                old_sequence, old = self.output.popleft()
+                self.dropped_sequence = max(self.dropped_sequence, old_sequence)
+                self.output_size -= len(old)
+
+    def _read_output(self, process: subprocess.Popen) -> None:
+        try:
+            if process.stdout is None:
+                self._append("\r\nPowerShell output is unavailable.\r\n")
+                return
+            for line in process.stdout:
+                if line.startswith(self.marker):
+                    with self.lock:
+                        self.cwd = line[len(self.marker):].strip()
+                    continue
+                self._append(line)
+        except OSError as error:
+            with self.lock:
+                self.error = f"Could not read PowerShell output: {error}"
+
+    def start(self) -> str | None:
+        with self.lock:
+            if self.process is not None and self.process.poll() is None:
+                return None
+
+            shell = shutil.which("pwsh") or shutil.which("powershell")
+            if not shell:
+                return "PowerShell was not found. Install PowerShell or add it to PATH."
+            cwd = Path.cwd()
+            try:
+                process = subprocess.Popen(
+                    [shell, "-NoLogo", "-NoProfile", "-NoExit", "-Command", "-"],
+                    cwd=cwd,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    bufsize=1,
+                    creationflags=tools.NO_WINDOW,
+                )
+            except OSError as error:
+                return f"Could not start PowerShell: {error}"
+
+            self.process = process
+            self.cwd = str(cwd)
+            self.output.clear()
+            self.output_size = 0
+            self.error = ""
+            reader = threading.Thread(target=self._read_output, args=(process,), daemon=True)
+            reader.start()
+            return None
+
+    def write(self, command: str) -> str | None:
+        if not command.strip():
+            return "Enter a PowerShell command first."
+        if len(command) > MAX_TERMINAL_COMMAND:
+            return f"Terminal commands must be at most {MAX_TERMINAL_COMMAND} characters."
+        if "\x00" in command:
+            return "Terminal commands cannot contain a null character."
+        with self.lock:
+            process = self.process
+            if process is None or process.poll() is not None or process.stdin is None:
+                return "PowerShell is not running. Start a new terminal session first."
+            try:
+                process.stdin.write(command + "\n")
+                process.stdin.write(f'Write-Output "{self.marker}$((Get-Location).Path)"\n')
+                process.stdin.flush()
+            except OSError as error:
+                self.error = f"Could not send input to PowerShell: {error}"
+                return self.error
+        return None
+
+    def clear(self) -> None:
+        with self.lock:
+            self.output.clear()
+            self.output_size = 0
+
+    def snapshot(self, after: int = 0) -> dict:
+        with self.lock:
+            chunks = list(self.output)
+            oldest = chunks[0][0] if chunks else self.sequence + 1
+            process = self.process
+            active = process is not None and process.poll() is None
+            return {
+                "active": active,
+                "cwd": self.cwd,
+                "seq": self.sequence,
+                "output": "".join(text for seq, text in chunks if seq > after),
+                "truncated": after < max(self.dropped_sequence, oldest - 1),
+                "error": self.error,
+            }
+
+    def stop(self) -> str | None:
+        with self.lock:
+            process = self.process
+        if process is None or process.poll() is not None:
+            return None
+        try:
+            process.terminate()
+            process.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            try:
+                process.kill()
+                process.wait(timeout=3)
+            except (OSError, subprocess.SubprocessError) as error:
+                return f"Could not stop PowerShell: {error}"
+        except OSError as error:
+            return f"Could not stop PowerShell: {error}"
+        return None
 
 
 class Hub:
@@ -240,6 +382,7 @@ class App:
         self.window: subprocess.Popen | None = None
         self.models: list[dict] = []
         self.ollama_ok = False
+        self.terminal = TerminalSession()
 
     # ------------------------------------------------------------ state
     def refresh_models(self) -> None:
@@ -578,6 +721,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.json({"text": config.read_memory(), "path": str(config.MEMORY_FILE)})
         if url.path == "/api/events":
             return self.stream_events()
+        if url.path == "/api/terminal":
+            try:
+                after = max(0, int(query.get("after", ["0"])[0]))
+            except ValueError:
+                return self.json({"error": "invalid terminal sequence"}, 400)
+            return self.json(app.terminal.snapshot(after))
         self.json({"error": "not found"}, 404)
 
     def stream_events(self) -> None:
@@ -618,6 +767,20 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/api/stop":
             app.stop()
             return self.json({"ok": True})
+        if url.path == "/api/terminal":
+            action = body.get("action")
+            if action == "start":
+                error = app.terminal.start()
+            elif action == "write":
+                error = app.terminal.write(str(body.get("text", "")))
+            elif action == "clear":
+                app.terminal.clear()
+                error = None
+            elif action == "stop":
+                error = app.terminal.stop()
+            else:
+                return self.json({"error": "unknown terminal action"}, 400)
+            return self.json({"error": error} if error else {"ok": True})
         if url.path == "/api/approve":
             app.approver.answer(str(body.get("id", "")), str(body.get("answer", "deny")))
             return self.json({"ok": True})
@@ -772,4 +935,7 @@ def run(port: int = 0) -> int:
             pass
     clear_instance(url)
     app.stop()
+    terminal_error = app.terminal.stop()
+    if terminal_error:
+        print(terminal_error, file=sys.stderr)
     os._exit(0)

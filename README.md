@@ -22,7 +22,7 @@ Developers: `python -m pip install -e .[dev]`, then `pytest`.
 
 ## Use
 
-Open **Forge** from the Start Menu: pick a project folder, then chat. Sessions, model and mode switching, file attachments (@), slash commands (/), approval cards and model downloads are all in the window. Or from a terminal:
+Open **Forge** from the Start Menu: pick a project folder, then chat. Sessions, model and mode switching, file attachments (@), slash commands (/), approval cards, model downloads and an integrated PowerShell terminal are in the window. Open **Terminal** in the header to start a persistent shell in the selected project folder; it runs as your Windows user and can modify any files that account can access. Or from a terminal:
 
 ```
 forge                      interactive session in the current folder

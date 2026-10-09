@@ -23,11 +23,32 @@
       <button class="icon" id="toggleSide" title="Toggle sidebar">☰</button>
       <button class="chip" id="folderBtn" title="Project folder">📁 <span id="folderName">Choose folder</span></button>
       <div class="grow"></div>
+      <button class="chip" id="terminalToggle" aria-expanded="false" title="Open integrated terminal">⌄ Terminal</button>
       <span class="dot" id="dot" title=""></span>
     </header>
     <div id="scroll">
       <div id="chat"></div>
     </div>
+    <section id="terminalPanel" aria-label="Integrated terminal" hidden>
+      <div class="terminal-toolbar">
+        <span class="terminal-tab">Terminal</span>
+        <span class="terminal-shell">PowerShell</span>
+        <span id="terminalCwd" class="terminal-cwd"></span>
+        <span class="terminal-safety" title="Commands run as your Windows user and can change files on this computer.">Local shell · runs as your Windows user</span>
+        <div class="grow"></div>
+        <button class="terminal-action" id="terminalClear" title="Clear terminal output">Clear</button>
+        <button class="terminal-action" id="terminalRestart" title="Restart PowerShell">＋</button>
+        <button class="terminal-action" id="terminalStop" title="Stop PowerShell">■</button>
+        <button class="terminal-action" id="terminalClose" title="Hide terminal">×</button>
+      </div>
+      <div id="terminalOutput" role="log" aria-live="off"></div>
+      <form id="terminalForm" autocomplete="off">
+        <span id="terminalPrompt">PS &gt;</span>
+        <input id="terminalInput" type="text" spellcheck="false" autocomplete="off"
+               placeholder="Enter a PowerShell command…" aria-label="PowerShell command">
+        <button class="terminal-run" type="submit">Run</button>
+      </form>
+    </section>
     <div id="dock">
       <div id="todo" hidden></div>
       <div id="menu" hidden></div>

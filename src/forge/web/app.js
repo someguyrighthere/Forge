@@ -2,8 +2,10 @@
 const T = new URLSearchParams(location.search).get("t") || "";
 const $ = (s) => document.querySelector(s);
 const chat = $("#chat"), scroller = $("#scroll"), input = $("#input"), menu = $("#menu");
+const terminalPanel = $("#terminalPanel"), terminalOutput = $("#terminalOutput"), terminalInput = $("#terminalInput");
 const S = { model: "", mode: "auto", cwd: "", used: 0, ctx: 16384, busy: false, ollama: false, models: [], recent: [], pulling: null, sessionId: "" };
 let working = null, welcomeEl = null, lastSession = null, menuItems = [], menuSel = 0;
+let terminalSeq = 0, terminalTimer = 0, terminalInFlight = false, terminalStarted = false, terminalErrorShown = "";
 const streams = {}, history = [];
 
 async function api(path, body) {
@@ -246,6 +248,88 @@ function handle(ev) {
       case "pull": renderPull(ev); break;
     }
   });
+}
+
+/* ------------------------------------------------------- terminal */
+function terminalWrite(text) {
+  const atBottom = terminalOutput.scrollHeight - terminalOutput.scrollTop - terminalOutput.clientHeight < 32;
+  terminalOutput.appendChild(document.createTextNode(text));
+  if (atBottom) terminalOutput.scrollTop = terminalOutput.scrollHeight;
+}
+
+async function pollTerminal() {
+  if (terminalPanel.hidden || terminalInFlight) return;
+  terminalInFlight = true;
+  try {
+    const state = await api("/api/terminal?after=" + terminalSeq);
+    if (state.error) {
+      if (terminalErrorShown !== state.error) {
+        terminalWrite("\r\n" + state.error + "\r\n");
+        terminalErrorShown = state.error;
+      }
+      return;
+    }
+    if (state.truncated) terminalOutput.textContent = "[Earlier terminal output was cleared.]\r\n";
+    if (state.output) terminalWrite(state.output);
+    terminalSeq = state.seq;
+    $("#terminalCwd").textContent = state.cwd || "";
+    $("#terminalCwd").title = state.cwd || "";
+    $("#terminalPrompt").textContent = "PS>";
+    $("#terminalStop").disabled = !state.active;
+    $("#terminalRestart").title = state.active ? "Restart PowerShell" : "Start PowerShell";
+    if (state.error && terminalErrorShown !== state.error) {
+      terminalWrite("\r\n" + state.error + "\r\n");
+      terminalErrorShown = state.error;
+    }
+  } finally {
+    terminalInFlight = false;
+  }
+}
+
+async function terminalAction(action, text) {
+  const result = await api("/api/terminal", { action, text: text || "" });
+  if (result.error) terminalWrite("\r\n" + result.error + "\r\n");
+  return result;
+}
+
+async function openTerminal() {
+  terminalPanel.hidden = false;
+  $("#terminalToggle").classList.add("active");
+  $("#terminalToggle").setAttribute("aria-expanded", "true");
+  if (!terminalStarted) {
+    terminalWrite("Commands run with your Windows account and can modify files on this computer.\r\n\r\n");
+    terminalStarted = true;
+  }
+  const result = await terminalAction("start");
+  if (!result.error) await pollTerminal();
+  clearInterval(terminalTimer);
+  terminalTimer = setInterval(pollTerminal, 350);
+  terminalInput.focus();
+}
+
+function closeTerminal() {
+  terminalPanel.hidden = true;
+  $("#terminalToggle").classList.remove("active");
+  $("#terminalToggle").setAttribute("aria-expanded", "false");
+  clearInterval(terminalTimer);
+}
+
+async function submitTerminal(event) {
+  event.preventDefault();
+  const command = terminalInput.value;
+  if (!command.trim()) return;
+  const cwd = $("#terminalCwd").textContent;
+  terminalWrite(`PS ${cwd ? cwd : ""}> ${command}\r\n`);
+  terminalInput.value = "";
+  await terminalAction("write", command);
+  pollTerminal();
+}
+
+async function restartTerminal() {
+  const stopped = await terminalAction("stop");
+  if (stopped.error) return;
+  const started = await terminalAction("start");
+  if (!started.error) pollTerminal();
 }
 
 /* ---------------------------------------------------------- welcome */
@@ -566,6 +650,15 @@ $("#memBtn").onclick = memoryDialog;
 $("#addonsBtn").onclick = addonsDialog;
 $("#attach").onclick = () => { input.focus(); input.value += (input.value && !input.value.endsWith(" ") ? " " : "") + "@"; autosize(); updateMenu(); };
 $("#toggleSide").onclick = () => $("#side").classList.toggle("collapsed");
+$("#terminalToggle").onclick = () => terminalPanel.hidden ? openTerminal() : closeTerminal();
+$("#terminalClose").onclick = closeTerminal;
+$("#terminalClear").onclick = async () => {
+  const result = await terminalAction("clear");
+  if (!result.error) terminalOutput.textContent = "";
+};
+$("#terminalRestart").onclick = restartTerminal;
+$("#terminalStop").onclick = async () => { await terminalAction("stop"); pollTerminal(); };
+$("#terminalForm").addEventListener("submit", submitTerminal);
 
 /* ------------------------------------------------------------- boot */
 (async () => {
